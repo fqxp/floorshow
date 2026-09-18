@@ -1,0 +1,287 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-18T18:22:24Z"
+ },
+ "title": "Mirrorballs Control UI",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 260,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Running (MIDI clock)"
+  },
+  "Main_Stopped.dc.html": {
+   "x": 1080,
+   "y": 260,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Stopped"
+  },
+  "Main_Starting.dc.html": {
+   "x": 2160,
+   "y": 260,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Starting"
+  },
+  "Main_Controls.dc.html": {
+   "x": 0,
+   "y": 1000,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Scene controls, Random mode"
+  },
+  "Main_MidiLost.dc.html": {
+   "x": 1080,
+   "y": 1000,
+   "w": 960,
+   "h": 620,
+   "title": "Main · MIDI clock lost"
+  },
+  "Main_SceneError.dc.html": {
+   "x": 2160,
+   "y": 1000,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Scene file error"
+  },
+  "Main_Calibrating.dc.html": {
+   "x": 0,
+   "y": 1740,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Calibration in progress"
+  },
+  "Main_FirstRun.dc.html": {
+   "x": 1080,
+   "y": 1740,
+   "w": 960,
+   "h": 620,
+   "title": "Main · First run"
+  },
+  "Main_Light.dc.html": {
+   "x": 2160,
+   "y": 1740,
+   "w": 960,
+   "h": 620,
+   "title": "Main · Light theme"
+  },
+  "Main_Menu.dc.html": {
+   "x": 0,
+   "y": 2480,
+   "w": 280,
+   "h": 232,
+   "title": "Main menu"
+  },
+  "Config_Scenes.dc.html": {
+   "x": 0,
+   "y": 3232,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Scenes"
+  },
+  "Config_ClockMidi.dc.html": {
+   "x": 840,
+   "y": 3232,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Clock (MIDI)"
+  },
+  "Config_ClockInternal.dc.html": {
+   "x": 1680,
+   "y": 3232,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Clock (Internal)"
+  },
+  "Config_Output.dc.html": {
+   "x": 0,
+   "y": 3952,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Output"
+  },
+  "Config_Midi.dc.html": {
+   "x": 840,
+   "y": 3952,
+   "w": 720,
+   "h": 600,
+   "title": "Config · MIDI mappings"
+  },
+  "Config_Director.dc.html": {
+   "x": 1680,
+   "y": 3952,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Director"
+  },
+  "Config_Calibration.dc.html": {
+   "x": 0,
+   "y": 4672,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Calibration"
+  },
+  "Config_Ball.dc.html": {
+   "x": 840,
+   "y": 4672,
+   "w": 720,
+   "h": 600,
+   "title": "Config · Ball"
+  },
+  "Config_Reset.dc.html": {
+   "x": 1680,
+   "y": 4672,
+   "w": 460,
+   "h": 260,
+   "title": "Confirm reset"
+  },
+  "Shortcuts.dc.html": {
+   "x": 0,
+   "y": 5392,
+   "w": 640,
+   "h": 470,
+   "title": "Keyboard shortcuts"
+  },
+  "Cal1_Default.dc.html": {
+   "x": 0,
+   "y": 6382,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ① · Default values"
+  },
+  "Cal1_Edited.dc.html": {
+   "x": 840,
+   "y": 6382,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ① · Edited"
+  },
+  "Cal1_Warning.dc.html": {
+   "x": 1680,
+   "y": 6382,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ① · Aspect warning"
+  },
+  "Cal1_Starting.dc.html": {
+   "x": 0,
+   "y": 7062,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ① · Renderer starting"
+  },
+  "Cal1_NotFullscreen.dc.html": {
+   "x": 840,
+   "y": 7062,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ① · Output not fullscreen"
+  },
+  "Cal2_Axis.dc.html": {
+   "x": 1680,
+   "y": 7062,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ② · Ball axis"
+  },
+  "Cal3_Rows.dc.html": {
+   "x": 0,
+   "y": 7742,
+   "w": 720,
+   "h": 560,
+   "title": "Calibration ③ · Tile rows"
+  },
+  "Components_A.dc.html": {
+   "x": 0,
+   "y": 8822,
+   "w": 1280,
+   "h": 820,
+   "title": "Components · Beat, Start/Stop, scenes"
+  },
+  "Components_B.dc.html": {
+   "x": 0,
+   "y": 9762,
+   "w": 1280,
+   "h": 820,
+   "title": "Components · Controls, feedback"
+  },
+  "Tokens.dc.html": {
+   "x": 0,
+   "y": 10702,
+   "w": 1280,
+   "h": 920,
+   "title": "Tokens · Colour, type, spacing"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "Main_Stopped.dc.html",
+  "Main_Starting.dc.html",
+  "Main_Controls.dc.html",
+  "Main_MidiLost.dc.html",
+  "Main_SceneError.dc.html",
+  "Main_Calibrating.dc.html",
+  "Main_FirstRun.dc.html",
+  "Main_Light.dc.html",
+  "Main_Menu.dc.html",
+  "Config_Scenes.dc.html",
+  "Config_ClockMidi.dc.html",
+  "Config_ClockInternal.dc.html",
+  "Config_Output.dc.html",
+  "Config_Midi.dc.html",
+  "Config_Director.dc.html",
+  "Config_Calibration.dc.html",
+  "Config_Ball.dc.html",
+  "Config_Reset.dc.html",
+  "Shortcuts.dc.html",
+  "Cal1_Default.dc.html",
+  "Cal1_Edited.dc.html",
+  "Cal1_Warning.dc.html",
+  "Cal1_Starting.dc.html",
+  "Cal1_NotFullscreen.dc.html",
+  "Cal2_Axis.dc.html",
+  "Cal3_Rows.dc.html",
+  "Components_A.dc.html",
+  "Components_B.dc.html",
+  "Tokens.dc.html"
+ ],
+ "notes": {
+  "sec1": {
+   "x": 0,
+   "y": 0,
+   "text": "Main control window",
+   "kind": "title1",
+   "maxW": 3120
+  },
+  "sec2": {
+   "x": 0,
+   "y": 2972,
+   "text": "Configuration dialog",
+   "kind": "title1",
+   "maxW": 2400
+  },
+  "sec3": {
+   "x": 0,
+   "y": 6122,
+   "text": "Calibration window",
+   "kind": "title1",
+   "maxW": 2400
+  },
+  "sec4": {
+   "x": 0,
+   "y": 8562,
+   "text": "Components and tokens",
+   "kind": "title1",
+   "maxW": 1280
+  }
+ },
+ "designSystems": []
+}

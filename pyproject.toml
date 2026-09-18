@@ -10,6 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
+mirrorballs = "mirrorballs.control.app:main"
 mirrorballs-render = "mirrorballs.render.app:main"
 mirrorballs-ctl = "mirrorballs.ctl.__main__:main"
 

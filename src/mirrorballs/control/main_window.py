@@ -1,0 +1,849 @@
+"""Main control window, built from the "Mirrorballs Control UI" design (Main boards).
+
+The window never decides anything about the show: it shows the renderer's state (streamed ~30 Hz)
+and sends commands. Offline it still shows the scene files, dimmed.
+"""
+
+from __future__ import annotations
+
+import math
+import subprocess
+import time
+from typing import Any
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+
+from ..common.scene import ParamDef  # noqa: E402
+from . import tokens, viewmodel as vm  # noqa: E402
+from .client import RendererClient  # noqa: E402
+from .library import Library  # noqa: E402
+from .store import ConfigStore  # noqa: E402
+
+START_TIMEOUT_S = 12.0
+
+
+# --- small widget helpers ----------------------------------------------------------------
+
+
+def label(text: str = "", *classes: str, xalign: float = 0.0, wrap: bool = False, hexpand: bool = False) -> Gtk.Label:
+    lb = Gtk.Label(label=text, xalign=xalign, wrap=wrap, hexpand=hexpand)
+    for c in classes:
+        if c:
+            lb.add_css_class(c)
+    return lb
+
+
+def kbd(text: str) -> Gtk.Label:
+    lb = label(text, "kbd", xalign=0.5)
+    lb.set_valign(Gtk.Align.CENTER)
+    return lb
+
+
+def icon(name: str, size: int = 16) -> Gtk.Image:
+    im = Gtk.Image.new_from_icon_name(name)
+    im.set_pixel_size(size)
+    return im
+
+
+def hbox(spacing: int = 8, *children: Gtk.Widget, **kw: Any) -> Gtk.Box:
+    b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=spacing, **kw)
+    for c in children:
+        b.append(c)
+    return b
+
+
+def vbox(spacing: int = 8, *children: Gtk.Widget, **kw: Any) -> Gtk.Box:
+    b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing, **kw)
+    for c in children:
+        b.append(c)
+    return b
+
+
+def set_classes(widget: Gtk.Widget, on: dict[str, bool]) -> None:
+    for name, enabled in on.items():
+        if enabled:
+            widget.add_css_class(name)
+        else:
+            widget.remove_css_class(name)
+
+
+def push_button(text: str, *classes: str, kbd_text: str | None = None, icon_name: str | None = None) -> Gtk.Button:
+    b = Gtk.Button()
+    b.add_css_class("mb-btn")
+    for c in classes:
+        b.add_css_class(c)
+    row = hbox(8, halign=Gtk.Align.CENTER)
+    if icon_name:
+        row.append(icon(icon_name))
+    if text:
+        row.append(label(text))
+    if kbd_text:
+        row.append(kbd(kbd_text))
+    b.set_child(row)
+    return b
+
+
+class BeatTile(Gtk.DrawingArea):
+    """68x68 tile that is red on the beat and fades into its ground until the next one. Red is used
+    for nothing else in the app."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_content_width(68)
+        self.set_content_height(68)
+        self.set_valign(Gtk.Align.CENTER)
+        self.add_css_class("beat-tile")
+        self.intensity = 0.0
+        self.dark = True
+        self.set_draw_func(self._draw)
+
+    def set_intensity(self, value: float) -> None:
+        if abs(value - self.intensity) > 0.004:
+            self.intensity = value
+            self.queue_draw()
+
+    def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
+        pal = tokens.palette(self.dark)
+        r, g, b = tokens.mix(pal["well"], pal["beat"], self.intensity)
+        rad = 14
+        cr.new_sub_path()
+        cr.arc(w - rad, rad, rad, -math.pi / 2, 0)
+        cr.arc(w - rad, h - rad, rad, 0, math.pi / 2)
+        cr.arc(rad, h - rad, rad, math.pi / 2, math.pi)
+        cr.arc(rad, rad, rad, math.pi, 3 * math.pi / 2)
+        cr.close_path()
+        cr.set_source_rgb(r, g, b)
+        cr.fill()
+
+
+class MainWindow(Adw.ApplicationWindow):
+    def __init__(
+        self,
+        app: Adw.Application,
+        client: RendererClient | None,
+        library: Library,
+        store: ConfigStore,
+        launch_renderer: Any = None,
+    ):
+        super().__init__(application=app, title="Mirrorballs", default_width=960, default_height=620)
+        self.set_size_request(720, 520)
+        self.add_css_class("mb")
+        self.client, self.library, self.store, self.launch_renderer = client, library, store, launch_renderer
+
+        self.connected = False
+        self.starting = False
+        self.state: dict[str, Any] | None = None
+        self.state_time = 0.0
+        self._start_deadline = 0.0
+        self._ui_guard = False
+        self._pips: list[Gtk.Label] = []
+        self._pip_current = -1
+        self._cards_key: tuple | None = None
+        self._params_key: tuple | None = None
+        self._banner_key: tuple | None = None
+        self._param_widgets: dict[str, Any] = {}
+        self._master_before_blackout = 0.85
+        self._brightness_timer = 0
+        self._pending_scene: str | None = None
+
+        cfg = store.load()
+        self.cfg = cfg
+        self.trans_idx = max(0, next((i for i, (k, _) in enumerate(vm.TRANSITIONS) if k == cfg.director.transition.type), 0))
+        self.len_idx = vm.nearest_length(cfg.director.transition.beats, cfg.clock.beats_per_bar)
+
+        self._build()
+        self._install_keys()
+        self.add_tick_callback(self._on_tick)
+        self.refresh()
+
+    # --- construction --------------------------------------------------------------------
+
+    def _build(self) -> None:
+        self.toasts = Adw.ToastOverlay()
+        view = Adw.ToolbarView()
+        self.toasts.set_child(view)
+        self.set_content(self.toasts)
+
+        header = Adw.HeaderBar()
+        header.add_css_class("mb-header")
+        header.set_show_start_title_buttons(False)
+        self.conn_chip = self._make_chip()
+        header.pack_start(self.conn_chip["box"])
+        header.set_title_widget(label("Mirrorballs", "title-label"))
+        menu = Gio.Menu()
+        menu.append("Configuration…", "win.config")
+        menu.append("Quit renderer", "win.quit-renderer")
+        section = Gio.Menu()
+        section.append("Keyboard shortcuts", "win.shortcuts")
+        section.append("About Mirrorballs", "win.about")
+        menu.append_section(None, section)
+        mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        mb.add_css_class("flat-icon")
+        mb.set_tooltip_text("Main menu")
+        header.pack_end(mb)
+        view.add_top_bar(header)
+
+        self.banner_box = vbox(0)
+        view.add_top_bar(self.banner_box)
+
+        self.content = hbox(12, margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        view.set_content(self.content)
+
+        left = vbox(12, hexpand=True)
+        left.append(self._build_top_row())
+        left.append(self._build_scenes_panel())
+        self.content.append(left)
+
+        right = vbox(12, width_request=272)
+        right.append(self._build_controls_panel())
+        right.append(self._build_master_panel())
+        self.content.append(right)
+
+        self._register_actions()
+
+    def _make_chip(self) -> dict[str, Any]:
+        dot = Gtk.Box()
+        dot.add_css_class("dot")
+        dot.set_valign(Gtk.Align.CENTER)
+        spinner = Gtk.Spinner(spinning=True, visible=False)
+        text = label("")
+        box = hbox(8, dot, spinner, text, valign=Gtk.Align.CENTER)
+        box.add_css_class("chip")
+        return {"box": box, "dot": dot, "spinner": spinner, "text": text}
+
+    def _build_top_row(self) -> Gtk.Widget:
+        self.run_btn = Gtk.Button()
+        self.run_btn.add_css_class("startstop")
+        self.run_btn.set_size_request(200, 92)
+        self.run_icon = icon("media-playback-start-symbolic", 26)
+        self.run_spinner = Gtk.Spinner(visible=False)
+        self.run_spinner.set_size_request(26, 26)
+        self.run_label = label("Start", "big")
+        self.run_kbd = kbd("Space")
+        col = vbox(6, hbox(10, self.run_icon, self.run_spinner, self.run_label, halign=Gtk.Align.CENTER), self.run_kbd,
+                   halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        self.run_btn.set_child(col)
+        self.run_btn.connect("clicked", lambda *_: self.act_toggle_run())
+
+        self.beat_tile = BeatTile()
+        self.source_chip = label("", "chip", "source")
+        self.source_chip.set_halign(Gtk.Align.START)
+        for n in range(1, 5):
+            p = label(str(n), "pip", xalign=0.5)
+            p.set_size_request(26, 26)
+            if n == 1:
+                p.add_css_class("down")
+            self._pips.append(p)
+        self.pips_box = hbox(8, *self._pips, margin_start=3)
+        self.tap_btn = push_button("Tap tempo", kbd_text="T")
+        self.tap_btn.connect("clicked", lambda *_: self.act_tap())
+        strip_right = vbox(10, self.source_chip, hbox(12, self.pips_box, Gtk.Box(hexpand=True), self.tap_btn), hexpand=True,
+                           valign=Gtk.Align.CENTER)
+        self.clock_panel = hbox(16, self.beat_tile, strip_right, hexpand=True)
+        self.clock_panel.add_css_class("panel")
+        self.clock_panel.set_margin_top(0)
+        return hbox(12, self.run_btn, self.clock_panel)
+
+    def _build_scenes_panel(self) -> Gtk.Widget:
+        self.prev_btn = push_button("Prev", "tall", kbd_text="[", icon_name="go-previous-symbolic")
+        self.next_btn = push_button("Next", "tall", kbd_text="]", icon_name="go-next-symbolic")
+        self.prev_btn.connect("clicked", lambda *_: self.act_step(-1))
+        self.next_btn.connect("clicked", lambda *_: self.act_step(+1))
+        head = hbox(8, label("Scenes", "panel-title", hexpand=True), self.prev_btn, self.next_btn)
+
+        self.manual_btn = Gtk.ToggleButton(label="Manual")
+        self.random_btn = Gtk.ToggleButton(label="Random")
+        self.random_btn.set_group(self.manual_btn)
+        seg = hbox(2, self.manual_btn, self.random_btn, valign=Gtk.Align.CENTER)
+        seg.add_css_class("segmented")
+        self.manual_btn.connect("toggled", self._on_mode_toggled)
+        self.random_btn.connect("toggled", self._on_mode_toggled)
+        self.every_bars = 8
+        self.every_label = label("", xalign=0.5)
+        self.every_label.set_width_chars(11)  # fixed width: the stepper must not grow with its text
+        minus, plus = Gtk.Button(icon_name="list-remove-symbolic"), Gtk.Button(icon_name="list-add-symbolic")
+        minus.connect("clicked", lambda *_: self._set_every(self.every_bars - 1))
+        plus.connect("clicked", lambda *_: self._set_every(self.every_bars + 1))
+        stepper = hbox(0, minus, self.every_label, plus)
+        stepper.add_css_class("stepper")
+        stepper.set_size_request(150, 36)
+        self.trans_dd = Gtk.DropDown.new_from_strings([n for _, n in vm.TRANSITIONS])
+        self.len_dd = Gtk.DropDown.new_from_strings([n for n, _ in vm.LENGTHS])
+        for dd, w in ((self.trans_dd, 140), (self.len_dd, 84)):
+            dd.add_css_class("mb-dd")
+            dd.set_size_request(w, 36)
+        self.trans_dd.set_tooltip_text("Transition between scenes")
+        self.len_dd.set_tooltip_text("Transition length")
+        self.trans_dd.set_selected(self.trans_idx)
+        self.len_dd.set_selected(self.len_idx)
+        self.trans_dd.connect("notify::selected", self._on_transition_changed)
+        self.len_dd.connect("notify::selected", self._on_transition_changed)
+        # A wrap box, not a row: on a narrow window the dropdowns drop to a second line instead of
+        # forcing the whole window wider.
+        options = Adw.WrapBox(child_spacing=8, line_spacing=8, justify=Adw.JustifyMode.SPREAD)
+        for w in (seg, stepper, self.trans_dd, self.len_dd):
+            options.append(w)
+
+        self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
+                                max_children_per_line=4, column_spacing=8, row_spacing=8, valign=Gtk.Align.START)
+        self.grid.add_css_class("scene-grid")
+        scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_child(self.grid)
+
+        self.empty_scenes = vbox(
+            10,
+            Gtk.Box(),  # spacer replaced below
+            halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, vexpand=True,
+        )
+        self._fill_empty(
+            self.empty_scenes, "view-grid-symbolic", "No scenes yet",
+            "Add a scene to get started. Scenes are small files you can edit in any text editor.",
+            [("Reveal folder", self.act_reveal_folder)],
+        )
+        self.scene_stack = Gtk.Stack(vexpand=True)
+        self.scene_stack.add_named(scroller, "grid")
+        self.scene_stack.add_named(self.empty_scenes, "empty")
+        panel = vbox(10, head, options, self.scene_stack, vexpand=True)
+        panel.add_css_class("panel")
+        self.scenes_panel = panel
+        return panel
+
+    def _fill_empty(self, box: Gtk.Box, icon_name: str, title: str, body: str, actions: list[tuple[str, Any]] | None = None,
+                    small: bool = False) -> None:
+        while (c := box.get_first_child()) is not None:
+            box.remove(c)
+        circle = Gtk.Box(halign=Gtk.Align.CENTER)
+        circle.add_css_class("empty-icon")
+        ic = icon(icon_name, 24)
+        ic.set_hexpand(True)
+        ic.set_halign(Gtk.Align.CENTER)
+        circle.append(ic)
+        box.append(circle)
+        box.append(label(title, "empty-title", *(["small"] if small else []), xalign=0.5))
+        box.append(label(body, "secondary", xalign=0.5, wrap=True))
+        if actions:
+            row = hbox(8, halign=Gtk.Align.CENTER, margin_top=6)
+            for text, fn in actions:
+                b = push_button(text, "tall")
+                b.connect("clicked", lambda *_a, fn=fn: fn())
+                row.append(b)
+            box.append(row)
+
+    def _build_controls_panel(self) -> Gtk.Widget:
+        self.controls_title = label("", "secondary")
+        self.controls_body = vbox(14, vexpand=True)
+        panel = vbox(12, vbox(2, label("Scene controls", "panel-title"), self.controls_title), self.controls_body, vexpand=True)
+        panel.add_css_class("panel")
+        self.controls_panel = panel
+        return panel
+
+    def _build_master_panel(self) -> Gtk.Widget:
+        self.brightness_label = label("85 %", "secondary")
+        self.brightness = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.brightness.set_draw_value(False)
+        self.brightness.add_css_class("mb-scale")
+        self.brightness.set_value(85)
+        self.brightness.connect("value-changed", self._on_brightness_changed)
+        self.blackout_btn = Gtk.ToggleButton()
+        self.blackout_btn.add_css_class("mb-btn")
+        self.blackout_btn.add_css_class("blackout")
+        self.blackout_btn.set_child(hbox(8, label("Blackout"), kbd("B"), halign=Gtk.Align.CENTER))
+        self.blackout_btn.connect("toggled", self._on_blackout_toggled)
+        panel = vbox(10, label("Master", "panel-title"),
+                     vbox(4, hbox(0, label("Brightness", hexpand=True), self.brightness_label), self.brightness),
+                     self.blackout_btn)
+        panel.add_css_class("panel")
+        self.master_panel = panel
+        return panel
+
+    # --- keyboard and actions ------------------------------------------------------------
+
+    def _install_keys(self) -> None:
+        ctrl = Gtk.EventControllerKey()
+        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)  # before a focused button can eat Space
+        ctrl.connect("key-pressed", self._on_key)
+        self.add_controller(ctrl)
+
+    def _on_key(self, _c: Any, keyval: int, _code: int, mods: Gdk.ModifierType) -> bool:
+        name = Gdk.keyval_name(keyval) or ""
+        ctrl = bool(mods & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(mods & Gdk.ModifierType.SHIFT_MASK)
+        if mods & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
+            return False
+        hit = vm.key_to_action(name, ctrl, shift)
+        if hit is None:
+            return False
+        self.run_action(*hit)
+        return True
+
+    def run_action(self, action: str, arg: Any = None) -> None:
+        if self.calibrating and action not in ("shortcuts",):
+            return  # inert while calibrating
+        if action == "toggle-run":
+            self.act_toggle_run()
+        elif action == "tap":
+            self.act_tap()
+        elif action == "blackout":
+            self.blackout_btn.set_active(not self.blackout_btn.get_active())
+        elif action == "mode":
+            (self.random_btn if arg == "random" else self.manual_btn).set_active(True)
+        elif action == "step":
+            self.act_step(arg)
+        elif action == "scene-key":
+            sid = vm.scene_for_key(arg, self.library.ids(), self.cfg.bindings.keys)
+            if sid:
+                self.act_scene(sid)
+        elif action == "brightness":
+            self.brightness.set_value(min(100, max(0, self.brightness.get_value() + arg)))
+        elif action == "config":
+            self.win_action("config")
+        elif action == "shortcuts":
+            self.win_action("shortcuts")
+
+    def _register_actions(self) -> None:
+        for name, fn in (
+            ("config", lambda *_: self.toast("The configuration dialog is not built yet.")),
+            ("quit-renderer", lambda *_: self.act_quit_renderer()),
+            ("shortcuts", lambda *_: self.show_shortcuts()),
+            ("about", lambda *_: self.show_about()),
+        ):
+            act = Gio.SimpleAction.new(name, None)
+            act.connect("activate", fn)
+            self.add_action(act)
+
+    def win_action(self, name: str) -> None:
+        self.lookup_action(name).activate(None)
+
+    @property
+    def calibrating(self) -> bool:
+        return bool(self.connected and self.state and self.state.get("calibrating"))
+
+    # --- commands ------------------------------------------------------------------------
+
+    def send(self, cmd: str, **fields: Any) -> bool:
+        return bool(self.client and self.client.send(cmd, **fields))
+
+    def toast(self, text: str) -> None:
+        self.toasts.add_toast(Adw.Toast.new(text))
+
+    def transition_payload(self) -> dict[str, Any]:
+        bpb = self.state["clock"]["beats_per_bar"] if self.state else self.cfg.clock.beats_per_bar
+        return vm.transition_payload(vm.TRANSITIONS[self.trans_idx][0], vm.LENGTHS[self.len_idx][1], bpb)
+
+    def act_toggle_run(self) -> None:
+        if self.starting and not self.connected:
+            return
+        if not self.connected:
+            self.start_renderer()
+        else:
+            self.send("running.set", running=not (self.state or {}).get("running", True))
+
+    def start_renderer(self) -> None:
+        try:
+            if self.launch_renderer:
+                self.launch_renderer()
+        except OSError as e:
+            self.toast(f"Could not start the renderer: {e}")
+            return
+        self.starting = True
+        self._start_deadline = time.monotonic() + START_TIMEOUT_S
+        self.refresh()
+
+    def act_tap(self) -> None:
+        self.send("tap")
+
+    def act_scene(self, sid: str) -> None:
+        if self.connected and sid != (self.state or {}).get("scene"):
+            self.send("scene.set", scene=sid, transition=self.transition_payload())
+
+    def act_step(self, delta: int) -> None:
+        ids = self.library.ids()
+        if not ids or not self.connected:
+            return
+        cur = (self.state or {}).get("scene")
+        i = ids.index(cur) if cur in ids else -1
+        self.act_scene(ids[(i + delta) % len(ids)])
+
+    def act_quit_renderer(self) -> None:
+        if self.connected:
+            self.send("quit")
+        else:
+            self.toast("The renderer is not running.")
+
+    def act_reveal_folder(self) -> None:
+        d = self.library.dirs[-1]
+        d.mkdir(parents=True, exist_ok=True)
+        Gtk.FileLauncher.new(Gio.File.new_for_path(str(d))).launch(self, None, None)
+
+    def act_banner(self, banner: vm.Banner) -> None:
+        if banner.kind == "midi_lost":
+            self.store.update({"clock": {"source": "internal"}})
+            self.send("reload")
+            self.toast("Switched to the internal clock.")
+        elif banner.kind == "scene_error" and banner.scene_id:
+            p = self.library.path_of(banner.scene_id)
+            if p:
+                Gtk.FileLauncher.new(Gio.File.new_for_path(str(p))).launch(self, None, None)
+        elif banner.kind == "calibrating":
+            self.toast("The calibration window is not built yet.")
+
+    def _on_mode_toggled(self, btn: Gtk.ToggleButton) -> None:
+        if self._ui_guard or not btn.get_active():
+            return  # state-driven changes and the button that just turned off send nothing
+        if btn is self.random_btn:
+            self.send("mode.set", mode="random", every={"bars": self.every_bars})
+        else:
+            self.send("mode.set", mode="manual")
+
+    def _set_every(self, bars: int) -> None:
+        self.every_bars = max(1, min(64, bars))
+        self.every_label.set_markup(f"Every <b>{self.every_bars}</b> bars")
+        if self.random_btn.get_active() and not self._ui_guard:
+            self.send("mode.set", mode="random", every={"bars": self.every_bars})
+
+    def _on_transition_changed(self, *_a: Any) -> None:
+        if self._ui_guard:
+            return
+        self.trans_idx, self.len_idx = self.trans_dd.get_selected(), self.len_dd.get_selected()
+        try:
+            self.store.update({"director": {"transition": self.transition_payload()}})
+            self.send("reload")
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the transition: {e}")
+
+    def _on_brightness_changed(self, scale: Gtk.Scale) -> None:
+        v = scale.get_value()
+        self.brightness_label.set_text(f"{v:.0f} %")
+        if self._ui_guard:
+            return
+        if self._brightness_timer:
+            GLib.source_remove(self._brightness_timer)
+        self._brightness_timer = GLib.timeout_add(40, self._send_brightness, v)
+
+    def _send_brightness(self, v: float) -> bool:
+        self._brightness_timer = 0
+        if self.blackout_btn.get_active():
+            self._ui_guard = True
+            self.blackout_btn.set_active(False)
+            self._ui_guard = False
+        self.send("master.set", value=round(v / 100, 3))
+        return False
+
+    def _on_blackout_toggled(self, btn: Gtk.ToggleButton) -> None:
+        if self._ui_guard:
+            return
+        if btn.get_active():
+            self._master_before_blackout = max(0.05, self.brightness.get_value() / 100)
+            self.send("master.set", value=0.0)
+        else:
+            self.send("master.set", value=self._master_before_blackout)
+
+    # --- state in ------------------------------------------------------------------------
+
+    def set_connection(self, up: bool) -> None:
+        self.connected = up
+        if up:
+            self.starting = False
+        else:
+            self.state = None
+        self.refresh()
+
+    def apply_state(self, state: dict[str, Any], t: float | None = None) -> None:
+        self.state = state
+        self.state_time = t if t is not None else time.monotonic()
+        self.starting = False
+        self.connected = True
+        if self.library.refresh():
+            self._cards_key = None
+        self.refresh()
+
+    # --- rendering -----------------------------------------------------------------------
+
+    def refresh(self) -> None:
+        if self.starting and not self.connected and time.monotonic() > self._start_deadline:
+            self.starting = False
+            self.toast("The renderer did not start. See ~/.local/state/mirrorballs/render.log")
+        st = self.state if self.connected else None
+        self._ui_guard = True
+        try:
+            self._refresh_header_and_run(st)
+            self._refresh_clock(st)
+            self._refresh_scenes(st)
+            self._refresh_controls(st)
+            self._refresh_master(st)
+            self._refresh_banners(st)
+            offline = not self.connected
+            live = not offline and not self.calibrating
+            # Scene files exist without a renderer, so the empty state's "Reveal folder" stays usable;
+            # everything that needs the renderer is dimmed and disabled instead.
+            for w in (self.prev_btn, self.next_btn, self.manual_btn.get_parent(), self.every_label.get_parent(),
+                      self.trans_dd, self.len_dd, self.grid):
+                w.set_sensitive(live)
+            set_classes(self.scenes_panel, {"disabled-area": offline and bool(self.library.ids())})
+            for w in (self.controls_panel, self.master_panel):
+                set_classes(w, {"disabled-area": offline})
+                w.set_sensitive(live)
+            self.scenes_panel.set_sensitive(not self.calibrating)
+            set_classes(self.clock_panel, {"disabled-area": offline})
+            self.clock_panel.set_sensitive(not self.calibrating)
+            self.tap_btn.set_sensitive(self.connected and not self.calibrating)
+            self.run_btn.set_sensitive(not self.calibrating)
+        finally:
+            self._ui_guard = False
+
+    def _refresh_header_and_run(self, st: dict[str, Any] | None) -> None:
+        chip = vm.renderer_chip(self.connected, self.starting, st)
+        c = self.conn_chip
+        c["text"].set_text(chip.text)
+        c["spinner"].set_visible(chip.kind == "busy")
+        c["dot"].set_visible(chip.kind != "busy")
+        set_classes(c["box"], {"off": chip.kind == "off"})
+        running = bool(st and st.get("running", True))
+        busy = self.starting and not self.connected
+        stop_mode = self.connected and running
+        set_classes(self.run_btn, {"start": not stop_mode and not busy, "stop": stop_mode, "busy": busy, "on-accent": not stop_mode and not busy})
+        self.run_icon.set_visible(not busy)
+        self.run_spinner.set_visible(busy)
+        self.run_spinner.set_spinning(busy)
+        self.run_icon.set_from_icon_name("media-playback-stop-symbolic" if stop_mode else "media-playback-start-symbolic")
+        self.run_label.set_text("Starting…" if busy else "Stop" if stop_mode else "Start")
+
+    def _refresh_clock(self, st: dict[str, Any] | None) -> None:
+        text, warn = vm.clock_text(st["clock"] if st else None, self.cfg.clock.source, self.cfg.clock.midi_port,
+                                   self.cfg.clock.bpm)
+        self.source_chip.set_text(text)
+        set_classes(self.source_chip, {"warn": warn})
+        set_classes(self.pips_box, {"dim": st is None})
+        if st:
+            self.cfg_bpb = st["clock"]["beats_per_bar"]
+            for i, p in enumerate(self._pips):
+                p.set_visible(i < st["clock"]["beats_per_bar"])
+
+    def _refresh_scenes(self, st: dict[str, Any] | None) -> None:
+        ids = self.library.ids()
+        current = st.get("scene") if st else None
+        mode = st.get("mode") if st else "manual"
+        key = (tuple(ids), current, self.connected)
+        if key != self._cards_key:
+            self._cards_key = key
+            self._rebuild_cards(ids, current)
+        self.scene_stack.set_visible_child_name("grid" if ids else "empty")
+        self.manual_btn.set_active(mode != "random")
+        self.random_btn.set_active(mode == "random")
+        if st and mode in ("random", "sequence"):
+            self.every_bars = max(1, round(st["every_beats"] / st["clock"]["beats_per_bar"]))
+        self.every_label.set_markup(f"Every <b>{self.every_bars}</b> bars")
+        self.trans_dd.set_selected(self.trans_idx)
+        self.len_dd.set_selected(self.len_idx)
+
+    def _rebuild_cards(self, ids: list[str], current: str | None) -> None:
+        while (c := self.grid.get_first_child()) is not None:
+            self.grid.remove(c)
+        keys = vm.hotkeys(ids, self.cfg.bindings.keys)
+        for sid in ids:
+            sc = self.library.scenes[sid]
+            live = sid == current
+            thumb = Gtk.Box(vexpand=True, hexpand=True)
+            thumb.add_css_class("thumb")
+            if live:
+                chip = label("Live", "live-chip", xalign=0.5)
+                chip.set_halign(Gtk.Align.START)
+                chip.set_valign(Gtk.Align.START)
+                thumb.append(chip)
+            name = label(sc.name or vm.display_name(sid), "name", hexpand=True)
+            name.set_ellipsize(3)  # Pango.EllipsizeMode.END
+            name.set_max_width_chars(9)  # natural width, so four cards fit in a row at 960 px
+            top = hbox(6, name, *([kbd(keys[sid])] if sid in keys else []))
+            tags = Adw.WrapBox(child_spacing=4, line_spacing=4)  # wraps, so tags never force the card wider
+            for t in sc.tags[:3]:
+                tags.append(label(t, "tag"))
+            btn = Gtk.Button()
+            btn.add_css_class("scene-card")
+            set_classes(btn, {"live": live})
+            btn.set_child(vbox(6, thumb, top, tags))
+            btn.set_size_request(-1, 112)
+            btn.connect("clicked", lambda _b, sid=sid: self.act_scene(sid))
+            self.grid.append(btn)
+
+    def _refresh_controls(self, st: dict[str, Any] | None) -> None:
+        sid = st.get("scene") if st else None
+        sc = self.library.scenes.get(sid) if sid else None
+        self.controls_title.set_text(sc.name if sc else "")
+        key = (sid, tuple((k, p.type) for k, p in (sc.params.items() if sc else [])))
+        if key != self._params_key:
+            self._params_key = key
+            self._rebuild_params(sc)
+        if sc and st:
+            self._update_param_values(st.get("params", {}))
+
+    def _rebuild_params(self, sc: Any) -> None:
+        while (c := self.controls_body.get_first_child()) is not None:
+            self.controls_body.remove(c)
+        self._param_widgets = {}
+        if sc is None:
+            box = vbox(10, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER, vexpand=True)
+            self._fill_empty(box, "preferences-other-symbolic", "No scene selected", "Select a scene to adjust it.", small=True)
+            self.controls_body.append(box)
+        elif not sc.params:
+            box = vbox(10, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER, vexpand=True)
+            self._fill_empty(box, "preferences-other-symbolic", "No parameters", "This scene has no adjustable parameters yet.",
+                             small=True)
+            self.controls_body.append(box)
+        else:
+            for name, p in sc.params.items():
+                self.controls_body.append(self._param_row(name, p))
+
+    def _param_row(self, name: str, p: ParamDef) -> Gtk.Widget:
+        title = p.label or vm.display_name(name)
+        if p.type in ("float", "int"):
+            lo, hi = (p.min if p.min is not None else 0.0), (p.max if p.max is not None else 100.0)
+            scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, 1 if p.type == "int" else (hi - lo) / 200)
+            scale.set_draw_value(False)
+            scale.add_css_class("mb-scale")
+            value = label("", "secondary")
+            unit = f" {p.unit}" if p.unit else ""
+
+            def changed(s: Gtk.Scale, name: str = name, value: Gtk.Label = value, unit: str = unit, t: str = p.type) -> None:
+                v = s.get_value()
+                value.set_text(f"{v:.0f}{unit}" if t == "int" or (hi - lo) >= 20 else f"{v:.2f}{unit}")
+                if not self._ui_guard:
+                    self.send("param.set", name=name, value=v)
+
+            scale.connect("value-changed", changed)
+            self._param_widgets[name] = ("scale", scale, changed)
+            return vbox(4, hbox(0, label(title, hexpand=True), value), scale)
+        if p.type == "bool":
+            sw = Gtk.Switch(valign=Gtk.Align.CENTER)
+            sw.add_css_class("mb-switch")
+            sw.connect("notify::active", lambda s, _p, name=name: (not self._ui_guard) and self.send("param.set", name=name, value=s.get_active()))
+            self._param_widgets[name] = ("switch", sw, None)
+            return hbox(8, label(title, hexpand=True), sw)
+        if p.type == "choice":
+            choices = p.choices or []
+            dd = Gtk.DropDown.new_from_strings(choices)
+            dd.add_css_class("mb-dd")
+            dd.connect("notify::selected", lambda d, _p, name=name, ch=choices: (not self._ui_guard) and self.send("param.set", name=name, value=ch[d.get_selected()]))
+            self._param_widgets[name] = ("choice", dd, choices)
+            return vbox(4, label(title), dd)
+        # colour
+        cb = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog())
+        cb.connect("notify::rgba", lambda b, _p, name=name: (not self._ui_guard) and self.send(
+            "param.set", name=name, value=[round(b.get_rgba().red, 4), round(b.get_rgba().green, 4), round(b.get_rgba().blue, 4)]))
+        self._param_widgets[name] = ("color", cb, None)
+        return hbox(8, label(title, hexpand=True), cb)
+
+    def _update_param_values(self, values: dict[str, Any]) -> None:
+        for name, (kind, w, extra) in self._param_widgets.items():
+            v = values.get(name)
+            if v is None:
+                continue
+            if kind == "scale":
+                if abs(w.get_value() - float(v)) > 1e-6 and not w.has_focus():
+                    w.set_value(float(v))
+                extra(w)
+            elif kind == "switch":
+                w.set_active(bool(v))
+            elif kind == "choice" and v in extra:
+                w.set_selected(extra.index(v))
+            elif kind == "color":
+                rgba = Gdk.RGBA()
+                if isinstance(v, str):
+                    rgba.parse(v)
+                elif isinstance(v, (list, tuple)) and len(v) == 3:
+                    rgba.red, rgba.green, rgba.blue, rgba.alpha = float(v[0]), float(v[1]), float(v[2]), 1.0
+                w.set_rgba(rgba)
+
+    def _refresh_master(self, st: dict[str, Any] | None) -> None:
+        if st is None:
+            return
+        pct = st["master"] * 100
+        if not self.brightness.has_focus() and self._brightness_timer == 0 and abs(self.brightness.get_value() - pct) > 0.5:
+            self.brightness.set_value(pct)
+        self.brightness_label.set_text(f"{self.brightness.get_value():.0f} %")
+        if st["master"] > 0.0:
+            self._master_before_blackout = max(0.05, st["master"])
+        self.blackout_btn.set_active(st["master"] <= 0.0)
+
+    def _refresh_banners(self, st: dict[str, Any] | None) -> None:
+        items = vm.banners(self.connected, st)
+        key = tuple((b.kind, b.text) for b in items)
+        if key == self._banner_key:
+            return
+        self._banner_key = key
+        while (c := self.banner_box.get_first_child()) is not None:
+            self.banner_box.remove(c)
+        for b in items:
+            row = hbox(10, icon("dialog-warning-symbolic", 18), label(b.text if b.kind != "scene_error" else f"{b.title} · {b.text}",
+                                                                      "banner-title" if b.kind == "calibrating" else "",
+                                                                      hexpand=True, wrap=True), valign=Gtk.Align.CENTER)
+            row.get_first_child().add_css_class("banner-icon")
+            btn = push_button(b.action)
+            btn.connect("clicked", lambda _b, b=b: self.act_banner(b))
+            row.append(btn)
+            row.add_css_class("banner")
+            self.banner_box.append(row)
+
+    # --- per-frame beat display ----------------------------------------------------------
+
+    def _on_tick(self, _w: Gtk.Widget, _clock: Any) -> bool:
+        st = self.state if self.connected else None
+        if st is None:
+            self.beat_tile.set_intensity(0.0)
+            self._set_pip(-1)
+        else:
+            idx, phase = vm.beat_in_bar(st["clock"], time.monotonic() - self.state_time)
+            self.beat_tile.set_intensity(tokens.beat_intensity(phase))
+            self._set_pip(idx)
+        if self.starting and time.monotonic() > self._start_deadline and not self.connected:
+            self.refresh()
+        return True  # keep ticking
+
+    def _set_pip(self, idx: int) -> None:
+        if idx == self._pip_current:
+            return
+        self._pip_current = idx
+        for i, p in enumerate(self._pips):
+            set_classes(p, {"current": i == idx})
+
+    def set_dark(self, dark: bool) -> None:
+        self.beat_tile.dark = dark
+        self.beat_tile.queue_draw()
+
+    # --- dialogs -------------------------------------------------------------------------
+
+    def show_about(self) -> None:
+        d = Adw.AboutDialog(application_name="Mirrorballs", version="0.1.0", developer_name="Frank Ploss",
+                            comments="Beat-driven projection for a mirror ball.", license_type=Gtk.License.GPL_3_0)
+        d.present(self)
+
+    def show_shortcuts(self) -> None:
+        rows = [
+            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Blackout", ["B"]),
+                             ("Scene 1–8", ["1", "…", "8"]), ("Previous / next scene", ["[", "]"]),
+                             ("Manual / Random", ["M", "R"]), ("Brightness", ["Ctrl", "↑↓"]),
+                             ("Configuration", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"])]),
+            ("Calibration", [("Left line", ["A", "D"]), ("Right line", ["J", "L"]), ("Top line", ["W", "S"]),
+                             ("Bottom line", ["I", "K"]), ("Move ball", ["←", "↑", "↓", "→"]), ("Grow / shrink", ["+", "−"]),
+                             ("Step", ["1", "2", "3"]), ("Blink / grid", ["B", "G"]), ("Cancel", ["Esc"]), ("Finish", ["Enter"])]),
+        ]
+        cols = hbox(32, margin_top=18, margin_bottom=18, margin_start=24, margin_end=24)
+        for title, items in rows:
+            col = vbox(6, hexpand=True)
+            col.append(label(title.upper(), "hint", xalign=0.0))
+            for name, keys in items:
+                col.append(hbox(8, label(name, hexpand=True), *[kbd(k) for k in keys]))
+            cols.append(col)
+        dlg = Adw.Dialog(title="Keyboard shortcuts", content_width=640)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(cols)
+        dlg.set_child(view)
+        dlg.present(self)
+
+
+def open_in_editor(path: str) -> None:  # pragma: no cover - thin wrapper for the terminal fallback
+    subprocess.Popen(["xdg-open", path], start_new_session=True)

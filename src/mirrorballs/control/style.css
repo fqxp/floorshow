@@ -1,0 +1,110 @@
+/* Mirrorballs control UI. Colours come from @define-color lines generated in tokens.py.
+   Rules: red is the beat only; amber is warning/error; one teal accent; never colour alone. */
+
+window.mb, window.mb-dialog { background: @bg0; color: @t1; font-feature-settings: "tnum"; }
+window.mb label { color: inherit; }
+
+/* header */
+headerbar.mb-header { background: @bg1; color: @t1; border-bottom: 1px solid @line; box-shadow: none; min-height: 48px; padding: 0 8px 0 12px; }
+headerbar.mb-header .title-label { font-weight: 700; font-size: 15px; }
+headerbar.mb-header button { color: @t2; }
+
+/* chips, tags, keyboard badges */
+.chip { background: @bg3; border: 1px solid @line2; border-radius: 15px; padding: 0 12px; min-height: 28px; font-size: 13px; color: @t1; }
+.chip.source { border-radius: 6px; min-height: 20px; padding: 0 8px; color: @t2; }
+.chip.source.warn { color: @amber_t; border-color: @amber_line; background: @amber_bg; }
+.chip .dot { min-width: 9px; min-height: 9px; border-radius: 50%; background: @acc; }
+.chip.off .dot { background: transparent; border: 2px solid @t3; min-width: 5px; min-height: 5px; }
+.tag { background: @bg3; border: 1px solid @line2; border-radius: 6px; font-size: 12px; padding: 0 8px; min-height: 20px; color: @t2; }
+.kbd { background: @bg4; color: @t2; border: 1px solid @line2; border-radius: 5px; font-size: 12px; font-weight: 700; min-width: 8px; min-height: 18px; padding: 0 6px; }
+.on-accent .kbd { background: alpha(black, 0.18); color: @on_acc; border-color: transparent; }
+
+/* panels */
+.panel { background: @bg2; border: 1px solid @line; border-radius: 12px; padding: 14px; }
+.panel-title { font-size: 16px; font-weight: 700; }
+.secondary { color: @t2; font-size: 13px; }
+.hint { color: @t3; }
+
+/* buttons */
+button.mb-btn { background: @bg3; background-image: none; color: @t1; border: 1px solid @line2; border-radius: 9px; min-height: 34px; padding: 0 12px; box-shadow: none; font-size: 13px; }
+button.mb-btn:hover { background: @bg4; }
+button.mb-btn:active { background: @bg4; }
+button.mb-btn:disabled { opacity: 0.45; }
+button.mb-btn.tall { min-height: 36px; font-size: 14px; }
+button.mb-btn.primary { background: @acc; color: @on_acc; border-color: @acc; font-weight: 700; min-height: 44px; }
+button.mb-btn.primary:hover { background: shade(@acc, 1.08); }
+button.mb-btn.blackout { min-height: 52px; font-size: 17px; font-weight: 700; }
+button.mb-btn.blackout:checked { background: @acc_bg; border-color: @acc; }
+button.flat-icon { background: transparent; background-image: none; border: 1px solid transparent; box-shadow: none; color: @t2; min-width: 36px; min-height: 36px; border-radius: 9px; padding: 0; }
+button.flat-icon:hover { background: @bg3; }
+button:focus-visible, button.mb-btn:focus-visible { outline: 2px solid @acc; outline-offset: 2px; }
+
+/* Start / Stop */
+button.startstop { border-radius: 14px; min-width: 200px; min-height: 92px; box-shadow: none; background-image: none; padding: 0; }
+button.startstop.start { background: @acc; color: @on_acc; border: 2px solid @acc; }
+button.startstop.start:hover { background: shade(@acc, 1.08); }
+button.startstop.stop { background: @bg3; color: @t1; border: 2px solid @line2; }
+button.startstop.stop:hover { background: @bg4; }
+button.startstop.busy { background: @bg3; color: @t2; border: 2px solid @line; }
+button.startstop .big { font-size: 26px; font-weight: 700; }
+
+/* clock strip */
+.beat-tile { border-radius: 14px; border: 1px solid @line; }
+.pip { min-width: 26px; min-height: 26px; border-radius: 13px; background: @bg3; color: @t3; border: 1px solid @line2; font-size: 13px; font-weight: 700; }
+.pip.down { border: 2px solid @t3; }
+.pip.current { background: @t1; color: @bg0; border-color: @t1; }
+.dim { opacity: 0.6; }
+.disabled-area { opacity: 0.45; }
+
+/* segmented control and stepper */
+.segmented { background: @bg0; border: 1px solid @line2; border-radius: 10px; padding: 3px; min-height: 30px; }
+.segmented button { background: transparent; background-image: none; border: 0; box-shadow: none; color: @t2; border-radius: 7px; min-height: 28px; padding: 0 12px; font-size: 14px; }
+.segmented button:checked { background: @acc_bg; color: @t1; }
+.stepper { background: @bg3; border: 1px solid @line2; border-radius: 9px; min-height: 36px; }
+.stepper button { background: transparent; background-image: none; border: 0; box-shadow: none; color: @t1; min-width: 30px; min-height: 34px; padding: 0; }
+
+/* dropdowns */
+dropdown.mb-dd > button { background: @bg3; background-image: none; color: @t1; border: 1px solid @line2; border-radius: 9px; min-height: 36px; box-shadow: none; padding: 0 10px; font-size: 14px; }
+dropdown.mb-dd > button:hover { background: @bg4; }
+popover.background > contents { background: @bg2; color: @t1; border: 1px solid @line2; border-radius: 12px; }
+popover modelbutton, popover row { color: @t1; }
+
+/* scene cards */
+button.scene-card { background: @bg3; background-image: none; border: 2px solid @line; border-radius: 11px; padding: 8px; box-shadow: none; color: @t1; }
+button.scene-card:hover { background: @bg4; }
+button.scene-card.live { background: @acc_bg; border-color: @acc; }
+.scene-card .thumb { background: @bg1; border: 1px dashed @line2; border-radius: 6px; padding: 5px; min-height: 56px; }
+.scene-card.live .thumb { border-color: @acc_line; }
+.scene-card .name { font-size: 14px; font-weight: 700; }
+.live-chip { background: @acc; color: @on_acc; border: 1px solid @acc; border-radius: 6px; font-size: 12px; font-weight: 700; padding: 0 8px; min-height: 20px; }
+flowbox.scene-grid > flowboxchild { padding: 0; background: transparent; }
+flowbox.scene-grid { background: transparent; }
+
+/* sliders */
+scale.mb-scale trough { background: @bg4; border-radius: 4px; min-height: 8px; border: 0; }
+scale.mb-scale highlight { background: @acc; border-radius: 4px; border: 0; }
+scale.mb-scale slider { background: @t1; border: 0; border-radius: 50%; min-width: 24px; min-height: 24px; margin: -8px; box-shadow: none; }
+scale.mb-scale:disabled { opacity: 0.45; }
+switch.mb-switch { background: @bg4; border: 1px solid @line2; border-radius: 13px; min-height: 26px; min-width: 46px; }
+switch.mb-switch:checked { background: @acc; border-color: @acc; }
+switch.mb-switch slider { background: @t1; border-radius: 50%; min-width: 20px; min-height: 20px; margin: 2px; }
+switch.mb-switch:checked slider { background: @on_acc; }
+
+/* banners (amber: warning and error, never red) */
+.banner { background: @amber_bg; border-bottom: 1px solid @amber_line; color: @amber_t; padding: 8px 12px; }
+.banner label { color: @amber_t; }
+.banner .banner-title { font-weight: 700; }
+.banner button.mb-btn { background: transparent; border-color: @amber_line; color: @amber_t; min-height: 30px; }
+.banner button.mb-btn:hover { background: alpha(@amber, 0.15); }
+.banner-icon { color: @amber; }
+
+/* empty states */
+.empty-icon { background: @bg3; border: 1px solid @line2; border-radius: 26px; min-width: 52px; min-height: 52px; color: @t2; }
+.empty-title { font-size: 20px; font-weight: 700; }
+.empty-title.small { font-size: 16px; }
+
+/* menus and toasts */
+popover.menu contents { background: @bg2; border: 1px solid @line2; border-radius: 12px; padding: 6px; }
+popover.menu modelbutton { min-height: 40px; border-radius: 8px; padding: 0 12px; color: @t1; }
+popover.menu modelbutton:hover { background: @bg3; }
+toast { background: @bg3; color: @t1; border: 1px solid @line2; }

@@ -234,8 +234,23 @@ def make_env(
         tile=tile, row_offset=row_offset,
     )
     for name, value in (params or {}).items():
-        env[f"param.{name}"] = float(value) if isinstance(value, (int, float)) else value
+        env[f"param.{name}"] = _param_value(value)
     return env
+
+
+def _param_value(value: Any) -> Any:
+    """Scene parameter as an expression value: numbers/bools become floats, ``[r,g,b]`` lists and
+    ``"#rrggbb"`` strings become colour tuples (usable in ``mix(param.tint, white, phase)``)."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        return (float(value[0]), float(value[1]), float(value[2]))
+    if isinstance(value, str) and value.startswith("#"):
+        try:
+            return parse_hex_color(value)
+        except ValueError:
+            return 0.0
+    return value
 
 
 # --- evaluation --------------------------------------------------------------------------

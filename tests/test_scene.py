@@ -175,3 +175,15 @@ def test_yaml_is_not_yaml_1_1_gotchas():
     # 'on'/'no' must stay strings, not booleans (why we use ruamel's YAML 1.2 loader)
     sc = scene("description: no\nlayers:\n  - {type: fill}\n")
     assert sc.description == "no"
+
+
+def test_colour_and_bool_params_reach_expressions():
+    sc = scene(
+        "params:\n  tint: {type: color, default: '#ff8000'}\n  on: {type: bool, default: true}\n"
+        "layers:\n  - {type: fill, color: 'mix(param.tint, white, 0.5)', alpha: 'param.on'}\n"
+    )
+    s = sc.evaluate(env(params=sc.default_params()))[0]
+    assert s.color == pytest.approx((1.0, 0.5 + 128 / 255 / 2, 0.5))
+    assert s.alpha == 1.0
+    s2 = sc.evaluate(env(params={"tint": [0.0, 0.0, 1.0], "on": False}))[0]
+    assert s2.color == pytest.approx((0.5, 0.5, 1.0)) and s2.alpha == 0.0

@@ -20,9 +20,10 @@ class SyncClient:
         self.sock.settimeout(timeout)
         try:
             self.sock.connect(str(path))
-        except (FileNotFoundError, ConnectionRefusedError):
+        except OSError as e:  # missing socket, refused, or an unusable path (e.g. longer than 107 bytes)
             self.sock.close()
-            raise NotRunning(f"no renderer is listening on {path}") from None
+            why = "no renderer is listening on" if isinstance(e, (FileNotFoundError, ConnectionRefusedError)) else f"cannot connect ({e}):"
+            raise NotRunning(f"{why} {path}") from None
         self._dec = LineDecoder()
         self._pending: list[dict[str, Any]] = []
         self._next_id = 1

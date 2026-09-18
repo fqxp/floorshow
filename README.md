@@ -1,18 +1,21 @@
 # mirrorballs3
 
 > **Work in progress: the app.** The demo below is being turned into a two-process app: a
-> projector output (`mirrorballs-render`) and a GTK controller (not built yet). See
-> `docs/design-brief.md` for the controller UI brief.
+> projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
+> The controller's main window is built; its configuration dialog and calibration window are not yet.
+> `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
-## The app (renderer only, so far)
+## The app
 
 ```sh
 uv sync --extra render --extra control
-uv run mirrorballs-render          # opens an ordinary window titled "Mirrorballs Output"
+uv run mirrorballs                 # the controller; Start launches the renderer (detached) if none is running
+uv run mirrorballs-render          # or start the renderer directly: an ordinary window "Mirrorballs Output"
 uv run mirrorballs-ctl scenes      # from another shell
 uv run mirrorballs-ctl scene ripples --transition crossfade --beats 2
 uv run mirrorballs-ctl mode random --bars 8
-uv run pytest
+uv run --extra render --extra control pytest
+uv run --extra control python tools/screenshot_ui.py OUTDIR   # render the main window in each design state
 ```
 
 The output is a normal window: move it to the projector and make it fullscreen with GNOME. GNOME has no
