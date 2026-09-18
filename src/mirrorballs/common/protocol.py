@@ -1,0 +1,110 @@
+"""Controller <-> renderer messages. Requests carry an optional ``id`` and get ``{"id", "ok"}`` or
+``{"id", "ok": false, "error"}`` back. Events (``"event": ...``) are unsolicited, renderer -> client."""
+
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
+from .config import Every, TransitionConfig
+
+PROTO = 1
+
+
+class _Cmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int | str | None = None
+
+
+class Hello(_Cmd):
+    cmd: Literal["hello"]
+    proto: int = PROTO
+
+
+class GetState(_Cmd):
+    cmd: Literal["get_state"]
+
+
+class SceneSet(_Cmd):
+    cmd: Literal["scene.set"]
+    scene: str
+    transition: TransitionConfig | None = None
+
+
+class RunningSet(_Cmd):
+    cmd: Literal["running.set"]
+    running: bool
+
+
+class ParamSet(_Cmd):
+    cmd: Literal["param.set"]
+    name: str
+    value: float | int | bool | str | list[float]
+
+
+class ModeSet(_Cmd):
+    cmd: Literal["mode.set"]
+    mode: Literal["manual", "random", "sequence"]
+    every: Every | None = None
+
+
+class MasterSet(_Cmd):
+    cmd: Literal["master.set"]
+    value: float = Field(ge=0, le=1)
+
+
+class CalibrationBegin(_Cmd):
+    cmd: Literal["calibration.begin"]
+
+
+class CalibrationPreview(_Cmd):
+    cmd: Literal["calibration.preview"]
+    left: float
+    right: float
+    top: float
+    bottom: float
+    roll_deg: float = 0.0
+    tilt_deg: float = 0.0
+    blink: bool = False
+    grid: bool = False
+    active: Literal["left", "right", "top", "bottom"] | None = None  # last-moved line, drawn brighter
+
+
+class CalibrationEnd(_Cmd):
+    cmd: Literal["calibration.end"]
+    commit: bool = False
+
+
+class Simple(_Cmd):
+    cmd: Literal["reload", "quit", "tap", "sync_downbeat", "scene.next", "scene.prev"]
+
+
+Command = Annotated[
+    Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | MasterSet
+    | CalibrationBegin | CalibrationPreview | CalibrationEnd | Simple,
+    Field(discriminator="cmd"),
+]
+_adapter: TypeAdapter[Any] = TypeAdapter(Command)
+
+
+def parse_command(msg: dict[str, Any]) -> _Cmd:
+    """Validate an incoming message. Raises ValueError with a readable message."""
+    try:
+        return _adapter.validate_python(msg)
+    except ValidationError as e:
+        first = e.errors()[0]
+        where = ".".join(str(p) for p in first["loc"][1:]) or "message"
+        raise ValueError(f"{where}: {'unknown key' if first['type'] == 'extra_forbidden' else first['msg']}") from None
+
+
+def ok(req_id: Any = None, **data: Any) -> dict[str, Any]:
+    return {"id": req_id, "ok": True, **data}
+
+
+def error(req_id: Any, message: str) -> dict[str, Any]:
+    return {"id": req_id, "ok": False, "error": message}
+
+
+def event(name: str, **data: Any) -> dict[str, Any]:
+    return {"event": name, **data}
