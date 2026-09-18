@@ -1,10 +1,10 @@
 schema: 1
 name: Kick spot
-description: A spot that jumps 45 degrees per beat and is big at the start of each beat.
+description: A spot that steps 30 degrees per beat across the lit front (lon -60..60) and is big at the start of each beat.
 tags: [beat, spot]
 layers:
   - type: circle
-    at: {lat: "20 * sin(beat * 0.5)", lon: "(floor(beat) % 8) * 45 - 180"}
+    at: {lat: "20 * sin(beat * 0.5)", lon: "(floor(beat) % 5) * 30 - 60"}
     radius: "26 if phase < 5/17 else 7"
     color: white
     softness: 1.5

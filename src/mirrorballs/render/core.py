@@ -402,7 +402,12 @@ class Core:
         except (KeyError, IndexError, ValueError) as e:
             log.warning("midi action %r failed: %s", do, e)
 
-    # --- per frame -----------------------------------------------------------------------
+    # --- per tick / per frame ------------------------------------------------------------
+
+    def tick(self, now: float) -> None:
+        """Time-driven decisions (random / sequence switching). Called by the control thread, so
+        the show keeps changing even if the display stalls; ``frame`` calls it too (idempotent)."""
+        self._director_step(self.clock.snapshot(now), now)
 
     def _tile(self) -> tuple[float, float | None]:
         b = self.config.ball
@@ -442,7 +447,7 @@ class Core:
 
         self._director_step(snap, now)
 
-        # blackout fade
+        # blackout fade (dt-based and clamped, so a long display stall just completes it)
         target = 1.0 if self.running else 0.0
         step = (now - self._level_time) / FADE_S
         self._level_time = now

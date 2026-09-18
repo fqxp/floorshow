@@ -285,3 +285,14 @@ def test_beat_reset_does_not_leave_negative_scene_beat(env):
     c.on_midi({"clock"}, bytes([0xFA]), 103.0)  # Start: beat jumps back to 0
     f = c.frame(103.05)
     assert f.incoming.shapes[0].outer >= 0.0
+
+
+def test_tick_drives_the_director_without_any_frames(env):
+    """The control thread calls tick(); scene changes must not depend on frames being drawn."""
+    c = make(env, "director: {mode: sequence, every: {beats: 4}}\n")
+    c.tick(100.0)
+    assert c.current == "a"
+    c.tick(102.1)  # 4+ beats later at 120 BPM, no frame() calls in between
+    assert c.current == "b"
+    c.tick(102.2)
+    assert c.current == "b"  # same slot: no double switch

@@ -1,5 +1,34 @@
 # mirrorballs3
 
+> **Work in progress: the app.** The demo below is being turned into a two-process app: a
+> projector output (`mirrorballs-render`) and a GTK controller (not built yet). See
+> `docs/design-brief.md` for the controller UI brief.
+
+## The app (renderer only, so far)
+
+```sh
+uv sync --extra render --extra control
+uv run mirrorballs-render          # opens an ordinary window titled "Mirrorballs Output"
+uv run mirrorballs-ctl scenes      # from another shell
+uv run mirrorballs-ctl scene ripples --transition crossfade --beats 2
+uv run mirrorballs-ctl mode random --bars 8
+uv run pytest
+```
+
+The output is a normal window: move it to the projector and make it fullscreen with GNOME. GNOME has no
+default fullscreen shortcut, so you can bind one:
+
+```sh
+gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "['<Super>F11']"
+```
+
+Config lives in `~/.config/mirrorballs/config.yaml`, scenes in `~/.config/mirrorballs/scenes/*.yaml`
+(bundled examples in `scenes/`). Both are hot-reloaded. Fake a MIDI clock with
+`uv run python tools/midi_clock.py --bpm 128`, then set `clock: {source: midi, midi_port: "mirrorballs test clock"}`.
+Only the projector-facing hemisphere of the ball is lit, so keep scene longitudes within about -90..90.
+
+---
+
 Computes the 2D image to feed a real video projector so that, once
 projected onto a real physical sphere placed in its light cone, chosen
 shapes appear to glow on the ball while everything else stays dark.

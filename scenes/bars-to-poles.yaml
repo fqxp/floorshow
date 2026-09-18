@@ -15,4 +15,4 @@ layers:
     snap: rows                               # light whole tile rows once rows are calibrated
     color: "mix(red, green, phase)"
     alpha: "1 - smoothstep(0.7, 1.0, phase)"
-    texture: {asset: weave, mapping: shape, scale: [8, 1], scroll: "beat * 0.25"}
+    texture: {asset: weave, mapping: shape, scale: [2, 1], scroll: "beat * 0.25"}

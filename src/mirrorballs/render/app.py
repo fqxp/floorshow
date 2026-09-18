@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import threading
 import time
 from pathlib import Path
 from queue import SimpleQueue
@@ -19,6 +20,7 @@ from .midi import MidiManager
 
 log = logging.getLogger("mirrorballs.render")
 STATE_HZ = 30.0
+CONTROL_TICK_S = 0.004
 TITLE = "Mirrorballs Output"
 
 
@@ -84,28 +86,53 @@ def main(argv: list[str] | None = None) -> int:
     midi = MidiManager(inbox)
     log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
 
-    next_state = 0.0
+    # Two threads, one lock. The control thread (IPC, MIDI, director, files, state stream) never
+    # waits for the display: swap_buffers can block for a long time when the compositor throttles
+    # frame callbacks (occluded window, projector asleep), and control must not stall with it.
+    lock = threading.Lock()
+    stop = threading.Event()
+
+    def control_loop() -> None:
+        next_state = 0.0
+        while not stop.is_set():
+            now = time.monotonic()
+            state = None
+            try:
+                with lock:
+                    pump(core, inbox, ipc, now)
+                    core.poll_files(now)
+                    core.tick(now)
+                    if core.midi_dirty:
+                        midi.configure(*core.midi_wants())
+                        core.midi_dirty = False
+                    midi.poll(now)
+                    core.midi_status = midi.status()
+                    if now >= next_state:
+                        state = core.state(now)
+                        next_state = now + 1.0 / STATE_HZ
+                if state is not None:
+                    ipc.broadcast(state)
+            except Exception:  # noqa: BLE001 - keep controlling even if one iteration fails
+                log.exception("control loop error")
+            stop.wait(CONTROL_TICK_S)
+
+    control = threading.Thread(target=control_loop, name="control", daemon=True)
+    control.start()
+
     last = time.monotonic()
     failed_msg = ""
     try:
         while not glfw.window_should_close(window) and not core.quit_requested:
             glfw.poll_events()
             now = time.monotonic()
-            pump(core, inbox, ipc, now)
-            core.poll_files(now)
-            if core.midi_dirty:
-                midi.configure(*core.midi_wants())
-                core.midi_dirty = False
-            midi.poll(now)
-            core.midi_status = midi.status()
-
             fw, fh = glfw.get_framebuffer_size(window)
             if fw <= 0 or fh <= 0:  # minimised
                 time.sleep(0.05)
                 continue
             pipe.set_size(fw, fh)
             try:
-                spec = core.frame(now, fw / fh)
+                with lock:
+                    spec = core.frame(now, fw / fh)
             except Exception as e:  # noqa: BLE001 - a scene bug must never stop the show
                 if str(e) != failed_msg:
                     log.exception("frame evaluation failed")
@@ -118,13 +145,12 @@ def main(argv: list[str] | None = None) -> int:
             last = time.monotonic()
             if dt > 0:
                 core.fps = 0.9 * core.fps + 0.1 / dt if core.fps else 1.0 / dt
-            if now >= next_state:
-                ipc.broadcast(core.state(now))
-                next_state = now + 1.0 / STATE_HZ
     except KeyboardInterrupt:
         pass
     finally:
         log.info("shutting down")
+        stop.set()
+        control.join(2)
         midi.close()
         ipc.stop()
         glfw.terminate()

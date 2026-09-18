@@ -47,7 +47,7 @@ def test_bars_scene_geometry():
     assert math.degrees(north.inner) == pytest.approx(90 - (lat + width / 2))
     assert math.degrees(north.outer) == pytest.approx(90 - (lat - width / 2))
     assert math.degrees(south.inner) == pytest.approx(90 + (lat - width / 2))
-    assert north.texture == 0 and north.tex_scale == (8.0, 1.0)
+    assert north.texture == 0 and north.tex_scale == (2.0, 1.0)
     assert north.color == pytest.approx((0.5, 0.5, 0.0))  # mix(red, green, 0.5)
     assert north.softness == 0.0  # snap: rows -> hard edges
 

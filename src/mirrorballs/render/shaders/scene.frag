@@ -45,6 +45,18 @@ vec2 textureCoord(vec3 d, vec3 center, float ang, float rin, float rout, float m
     return vec2((lon / (2.0 * PI) + 0.5) * scale.x + scroll, (lat / PI + 0.5) * scale.y);
 }
 
+// Mipmapped lookup. The azimuth coordinate jumps at its seam, which would make the automatic
+// derivatives huge for one pixel column (a visible line at the lowest mip). Take the smaller of
+// the derivatives of u and of a wrapped copy of u, which has no jump there.
+vec4 sampleTex(vec2 uv, float layer) {
+    vec2 dx = dFdx(uv), dy = dFdy(uv);
+    vec2 uw = vec2(fract(uv.x + 0.5) - 0.5, uv.y);
+    vec2 dx2 = dFdx(uw), dy2 = dFdy(uw);
+    if (abs(dx2.x) < abs(dx.x)) dx.x = dx2.x;
+    if (abs(dy2.x) < abs(dy.x)) dy.x = dy2.x;
+    return textureGrad(u_tex, vec3(uv, layer), dx, dy);
+}
+
 void main() {
     vec3 dImg;
     if (!pixelToImageDir(gl_FragCoord.xy, dImg)) {
@@ -58,14 +70,16 @@ void main() {
         Shape s = shapes[i];
         vec3 d = s.c.w > 0.5 ? dImg : dBall;
         float ang = acos(clamp(dot(d, s.a.xyz), -1.0, 1.0));
-        float cov = annulusCoverage(ang, s.a.w, s.b.x, s.b.y);
-        if (cov <= 0.0) continue;
 
+        // Sample before the coverage early-out: derivatives need uniform control flow, and
+        // "has a texture" comes from the uniform block, so it is uniform across the draw.
         vec3 src = s.c.rgb;
         if (s.t.x >= 0.0) {
             vec2 uv = textureCoord(d, s.a.xyz, ang, s.a.w, s.b.x, s.t.y, s.s.xy, s.t.z);
-            src *= textureLod(u_tex, vec3(uv, s.t.x), 0.0).rgb;
+            src *= sampleTex(uv, s.t.x).rgb;
         }
+        float cov = annulusCoverage(ang, s.a.w, s.b.x, s.b.y);
+        if (cov <= 0.0) continue;
         float a = cov * s.b.z;
         int blend = int(s.b.w + 0.5);
         if (blend == 1)      col = col + src * a;
