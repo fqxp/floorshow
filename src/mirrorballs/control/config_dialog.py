@@ -714,8 +714,8 @@ class ConfigDialog(Adw.Window):
         page.append(g2)
         g3 = SettingsGroup("Advanced")
         adv = push_button("Advanced calibration…")
-        adv.set_sensitive(False)
-        adv.set_tooltip_text("Ball axis and tile rows: coming later")
+        adv.set_tooltip_text("Ball axis and tile rows")
+        adv.connect("clicked", lambda *_: self.main.open_calibration(step=2))
         g3.add(setting_row("Advanced calibration…", "Ball axis and tile rows.", adv))
         page.append(g3)
 

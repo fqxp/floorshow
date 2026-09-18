@@ -198,3 +198,66 @@ def test_measured_luminance_is_exact_at_any_frame_size(gl, size):
     for color, expect in (((1, 1, 1), 1.0), ((0.5, 0.5, 0.5), 0.5), ((1, 0, 0), 0.2126)):
         got = draw(pipe, FrameSpec(cal=cal, incoming=SlotSpec([shape(color=color)])), dest, measure=True)
         assert got == pytest.approx(expect, abs=0.03), (size, color)
+
+
+def _lat(cal, x, y, w=W, h=H):
+    d = cal.pixel_to_ball_dir((x + 0.5) / w, (y + 0.5) / h)
+    return None if d is None else lat_lon(d)[0]
+
+
+def _row_mismatches(gl, cal, mode, pitch, offset):
+    """(pixels compared, wrongly lit or dark) for the row overlay against the CPU geometry. Pixels near a stripe
+    edge are skipped: edges are anti-aliased over one pixel, and stripes thinner than that (near the limb) cannot
+    be shown as fully lit."""
+    pipe, dest = gl
+    pipe.render_scene(0, [], cal)
+    pipe.render_scene(1, [], cal)
+    pipe.composite(dest, cal, overlay=Overlay(rows=(mode, pitch, offset)))
+    img = pipe.read_rgb(dest).astype(int)
+    exp = [[None] * W for _ in range(H)]  # None: outside the ball, or outside the zebra's +-60 degrees
+    for y in range(H):
+        for x in range(W):
+            lat = _lat(cal, x, y)
+            if lat is None:
+                assert img[y, x].tolist() == [0, 0, 0]
+            elif mode == "single":
+                exp[y][x] = 0.0 <= (lat - offset) / pitch < 1.0
+            elif abs(lat) <= 60:
+                exp[y][x] = math.floor((lat - offset) / pitch) % 2 == 0
+    checked = bad = 0
+    for y in range(H):
+        for x in range(W):
+            e = exp[y][x]
+            if e is None or any(exp[yy][xx] != e for yy in range(max(0, y - 2), min(H, y + 3))
+                                for xx in range(max(0, x - 2), min(W, x + 3))):
+                continue
+            checked += 1
+            bad += (img[y, x, 0] > 127) != e
+    return checked, bad
+
+
+@pytest.mark.parametrize("tilt,roll", [(0, 0), (22, 12), (-15, 0)])
+def test_zebra_rows_follow_the_ball_frame_latitude(gl, tilt, roll):
+    checked, bad = _row_mismatches(gl, Calibration(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt), "zebra", 10.0, 2.0)
+    assert checked > 5000 and bad == 0, (checked, bad)
+
+
+@pytest.mark.parametrize("tilt,roll", [(0, 0), (25, -10)])
+def test_single_row_lights_exactly_one_row(gl, tilt, roll):
+    checked, bad = _row_mismatches(gl, Calibration.default(W / H).__class__(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt),
+                                   "single", 8.0, 1.0)
+    assert checked > 5000 and bad == 0, (checked, bad)
+
+
+def test_crosshair_is_drawn_at_the_requested_place(gl):
+    pipe, dest = gl
+    cal = Calibration.default(W / H)
+    pipe.render_scene(0, [], cal)
+    pipe.render_scene(1, [], cal)
+    pipe.composite(dest, cal, overlay=Overlay(crosshair=(0.25, 0.30)))
+    img = pipe.read_rgb(dest).astype(int)
+    cx, cy = int(0.25 * W), int(0.30 * H)
+    assert img[cy, cx - 8].max() > 200 and img[cy - 8, cx].max() > 200  # the arms
+    assert img[cy + 40, cx + 40].max() == 0 and img[H // 2, W // 2].max() == 0
+    pipe.composite(dest, cal, overlay=Overlay())
+    assert pipe.read_rgb(dest).max() == 0  # off by default

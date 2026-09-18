@@ -380,3 +380,22 @@ def test_flash_guard_dims_the_output_and_reports_it(env):
     (env[1]).write_text("safety: {flash_limit: false}\n")
     c.poll_files(t + 1.0)
     assert not c.state(t)["flash"]["enabled"] and c.frame(t + 1.0).master == 1.0
+
+
+def test_calibration_preview_carries_crosshair_rows_and_line_visibility(env):
+    c = make(env)
+    cmd(c, {"cmd": "calibration.begin"}, client="ctl")
+    base = {"cmd": "calibration.preview", "left": 0.3, "right": 0.7, "top": 0.2, "bottom": 0.8}
+    cmd(c, {**base, "roll_deg": 5, "tilt_deg": 20, "lines": False, "grid": True, "crosshair": [0.5, 0.3]}, client="ctl")
+    o = c.frame(100.0).overlay
+    assert o.lines is None and o.grid and o.crosshair == (0.5, 0.3) and o.rows is None
+    assert c.frame(100.0).cal.tilt_deg == 20
+    cmd(c, {**base, "lines": False, "rows": {"mode": "single", "pitch_deg": 3.8, "offset_deg": 0.4}}, client="ctl")
+    assert c.frame(100.0).overlay.rows == ("single", 3.8, 0.4)
+    with pytest.raises(ValueError, match="rows.pitch_deg"):  # rejected while parsing, before it reaches the core
+        P.parse_command({**base, "rows": {"mode": "zebra", "pitch_deg": 40, "offset_deg": 0}})
+    cmd(c, {**base, "roll_deg": 5, "tilt_deg": 20}, client="ctl")
+    assert c.frame(100.0).overlay.lines == (0.3, 0.7, 0.2, 0.8)  # step 1 again: the lines are back
+    cmd(c, {"cmd": "calibration.end", "commit": True}, client="ctl")
+    committed = c.calibration(None)
+    assert (committed.roll_deg, committed.tilt_deg) == (5.0, 20.0)  # roll and tilt are committed with the lines

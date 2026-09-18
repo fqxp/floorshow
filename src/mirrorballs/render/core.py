@@ -499,8 +499,13 @@ class Core:
                 cal_view = Calibration(pv["left"], pv["right"], pv["top"], pv["bottom"], pv["roll_deg"], pv["tilt_deg"])
                 visible = 1.0 if not pv["blink"] or int(now * 2) % 2 == 0 else 0.0
                 levels = tuple((1.0 if pv["active"] == side else 0.6) * visible for side in ("left", "right", "top", "bottom"))
-                overlay = Overlay(lines=(cal_view.left, cal_view.right, cal_view.top, cal_view.bottom),
-                                  levels=levels, grid=pv["grid"])  # type: ignore[arg-type]
+                rows = pv.get("rows")
+                overlay = Overlay(
+                    lines=(cal_view.left, cal_view.right, cal_view.top, cal_view.bottom) if pv.get("lines", True) else None,
+                    levels=levels, grid=pv["grid"],  # type: ignore[arg-type]
+                    crosshair=tuple(pv["crosshair"]) if pv.get("crosshair") else None,
+                    rows=(rows["mode"], rows["pitch_deg"], rows["offset_deg"]) if rows else None,
+                )
             return FrameSpec(cal=cal_view, incoming=None, overlay=overlay)
 
         if self.test_pattern:

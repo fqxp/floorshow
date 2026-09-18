@@ -102,3 +102,125 @@ def test_no_shortcut_for_reset_and_unknown_keys_are_ignored():
 
 def test_fmt_px():
     assert fmt_px(960.0) == "960" and fmt_px(425.25) == "425.25" and fmt_px(0.5) == "0.5"
+
+
+# --- step 2 and 3 -------------------------------------------------------------------------------
+
+import math  # noqa: E402
+
+from mirrorballs.common.geometry import pole_marker  # noqa: E402
+from mirrorballs.control.calibration_model import AxisSession, RowsSession, axis_key_to_action, rows_key_to_action  # noqa: E402
+
+
+def axis(**kw):
+    return AxisSession(Calibration.default(W / H), W, H, **kw)
+
+
+def test_axis_starts_at_the_saved_roll_and_tilt():
+    cal = Calibration(0.3, 0.7, 0.1, 0.9, roll_deg=10, tilt_deg=25)
+    a = AxisSession(cal, W, H)
+    assert (a.px, a.py) == pytest.approx(pole_marker(10, 25))
+    r, t = a.roll_tilt()
+    assert (r, t) == pytest.approx((10, 25), abs=1e-6) and a.above and not a.dirty
+    below = AxisSession(Calibration(0.3, 0.7, 0.1, 0.9, tilt_deg=-15), W, H)
+    assert not below.above and below.roll_tilt()[1] == pytest.approx(-15, abs=1e-6)
+
+
+def test_axis_default_is_a_level_projector_with_the_pole_on_the_silhouette_top():
+    a = axis()
+    assert (a.px, a.py) == pytest.approx((0, 1)) and a.roll_tilt() == pytest.approx((0, 0), abs=1e-6) and not a.dirty
+
+
+def test_moving_the_crosshair_down_from_the_top_creates_tilt():
+    a = axis()
+    a.step = "coarse"
+    for _ in range(10):
+        a.move(0, +1)  # 100 px down on a 756 px ball (radius 378 px)
+    r, t = a.roll_tilt()
+    assert t == pytest.approx(math.degrees(math.acos(1 - 100 / 378)), abs=0.01) and r == pytest.approx(0, abs=1e-6)
+    assert a.dirty and "above" in a.texts()[0]
+    a.set_above(False)
+    assert a.roll_tilt()[1] == pytest.approx(-t)
+    assert "below" in a.texts()[0]
+
+
+def test_moving_sideways_creates_roll_and_the_marker_never_leaves_the_silhouette():
+    a = axis()
+    a.step = "coarse"
+    a.move(0, +1)
+    for _ in range(5):
+        a.move(+1, 0)  # marker moves right: the axis leans right (negative roll in this convention)
+    r, _t = a.roll_tilt()
+    assert r < 0 and "leans right" in a.texts()[1]
+    for _ in range(200):
+        a.move(+1, -1)
+    assert math.hypot(a.px, a.py) <= 1.0 + 1e-9
+
+
+def test_numeric_fallback_sets_the_tilt_from_height_and_distance():
+    a = axis()
+    a.set_numbers(height_cm=35, distance_m=2.4)  # the design board's example values
+    assert a.roll_tilt()[1] == pytest.approx(math.degrees(math.atan(0.35 / 2.4)), abs=1e-6)
+    assert a.roll_tilt()[1] == pytest.approx(8.3, abs=0.05)
+    a.set_numbers(distance_m=1.2)  # closer: steeper
+    assert a.roll_tilt()[1] > 8.3
+    b = axis()
+    b.step = "coarse"
+    b.move(+1, +1)  # some roll first
+    r0 = b.roll_tilt()[0]
+    b.set_numbers(height_cm=50, distance_m=3)
+    assert b.roll_tilt()[0] == pytest.approx(r0, abs=1e-6)  # the fallback changes the tilt, not the roll
+
+
+def test_crosshair_position_for_the_renderer_overlay():
+    cal = Calibration(0.3, 0.7, 0.1, 0.9, roll_deg=0, tilt_deg=30)
+    a = AxisSession(cal, W, H)
+    x, y = a.crosshair_norm()
+    assert x == pytest.approx(0.5) and y == pytest.approx(0.5 - 0.4 * math.cos(math.radians(30)))
+    assert a.calibration().tilt_deg == pytest.approx(30, abs=1e-6)
+
+
+def test_axis_keys():
+    assert axis_key_to_action("Left") == ("cross", (-1, 0)) and axis_key_to_action("2") == ("step", "normal")
+    assert axis_key_to_action("Return") == ("next", None) and axis_key_to_action("Escape") == ("cancel", None)
+    assert axis_key_to_action("BackSpace") == ("back", None) and axis_key_to_action("a") is None
+
+
+def test_rows_nudging_and_readout_match_the_design_board():
+    r = RowsSession(pitch=180 / 47.3)
+    assert r.text() == "rows ≈ 47.3 · tile 3.8°"  # the design's example
+    r.apply("pitch", +1)
+    assert r.pitch == pytest.approx(180 / 47.3 + 0.02) and r.dirty
+    r.apply("step", "coarse")
+    r.apply("offset", +1)
+    assert r.offset == pytest.approx(1.0)  # 1 degree is inside one row (+-1.9), so no wrap yet
+    for _ in range(50):
+        r.apply("offset", +1)
+    assert -r.pitch / 2 <= r.offset < r.pitch / 2
+
+
+def test_rows_pitch_is_clamped_and_pattern_toggles():
+    r = RowsSession(pitch=1.02, step="coarse")
+    for _ in range(5):
+        r.apply("pitch", -1)
+    assert r.pitch == 1.0
+    r.pitch = 11.95
+    for _ in range(5):
+        r.apply("pitch", +1)
+    assert r.pitch == 12.0
+    assert r.mode == "zebra"
+    r.apply("pattern", None)
+    assert r.mode == "single" and r.preview()["mode"] == "single"
+
+
+def test_rows_offset_only_matters_modulo_a_row():
+    r = RowsSession(pitch=4.0, offset=5.0)  # 5 = one row + 1 degree
+    assert r.offset == pytest.approx(1.0)
+    r = RowsSession(pitch=4.0, offset=-3.0)
+    assert r.offset == pytest.approx(1.0)
+
+
+def test_rows_keys():
+    assert rows_key_to_action("Up") == ("offset", 1) and rows_key_to_action("Left") == ("pitch", -1)
+    assert rows_key_to_action("z") == ("pattern", None) and rows_key_to_action("Return") == ("finish", None)
+    assert rows_key_to_action("x") is None

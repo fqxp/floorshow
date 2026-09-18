@@ -58,6 +58,13 @@ class CalibrationBegin(_Cmd):
     cmd: Literal["calibration.begin"]
 
 
+class RowsPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["zebra", "single"] = "zebra"
+    pitch_deg: float = Field(ge=1.0, le=12.0)
+    offset_deg: float = Field(ge=-12.0, le=12.0)
+
+
 class CalibrationPreview(_Cmd):
     cmd: Literal["calibration.preview"]
     left: float
@@ -69,6 +76,9 @@ class CalibrationPreview(_Cmd):
     blink: bool = False
     grid: bool = False
     active: Literal["left", "right", "top", "bottom"] | None = None  # last-moved line, drawn brighter
+    lines: bool = True  # the four silhouette lines (step 1)
+    crosshair: tuple[float, float] | None = None  # step 2: where the pole marker is drawn (window fractions, top-down)
+    rows: RowsPreview | None = None  # step 3: the tile-row stripes
 
 
 class CalibrationEnd(_Cmd):

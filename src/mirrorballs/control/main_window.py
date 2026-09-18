@@ -448,7 +448,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.config_dialog.show_tab(tab)
         self.config_dialog.present()
 
-    def open_calibration(self) -> None:
+    def open_calibration(self, step: int = 1) -> None:
+        """Open the calibration window, optionally on step 2 (ball axis) or 3 (tile rows)."""
         from .calibration import CalibrationWindow
 
         if self.calibration_window is not None:
@@ -456,7 +457,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if not self.connected and not self.starting:
             self.start_renderer()  # the window shows "Starting the renderer..." until it connects
-        self.calibration_window = CalibrationWindow(self)
+        self.calibration_window = CalibrationWindow(self, start_step=step)
         self.calibration_window.present()
         if self.state:
             self.calibration_window.on_state(self.state)

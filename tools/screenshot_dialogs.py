@@ -44,13 +44,20 @@ def pump(ms=400):
 
 
 def shot(win, name):
-    pump(500)
-    w, h = win.get_width(), win.get_height()
-    snap = Gtk.Snapshot()
-    Gtk.WidgetPaintable.new(win).snapshot(snap, w, h)
-    tex = win.get_native().get_renderer().render_texture(snap.to_node(), Graphene.Rect().init(0, 0, w, h))
-    tex.save_to_png(str(OUT / f"{name}.png"))
-    print("saved", name, w, h)
+    """Snapshot ``win`` to a PNG. A window that has not produced a frame yet gives an empty render node,
+    so wait and retry."""
+    for _ in range(10):
+        pump(400)
+        w, h = win.get_width(), win.get_height()
+        snap = Gtk.Snapshot()
+        Gtk.WidgetPaintable.new(win).snapshot(snap, w, h)
+        node = snap.to_node()
+        if node is not None:
+            tex = win.get_native().get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
+            tex.save_to_png(str(OUT / f"{name}.png"))
+            print("saved", name, w, h)
+            return
+    raise RuntimeError(f"no frame for {name}")
 
 
 def clock(**kw):
@@ -127,6 +134,18 @@ def on_activate(app):
         cal.session.apply("line", ("right", +1))
     cal._update()
     shot(cal, "cal1_warning")
+    cal.session.reset(cal._default_calibration())
+    cal._go(2)
+    cal._axis_act("step", "coarse")
+    for _ in range(6):
+        cal._axis_act("cross", (0, 1))
+    for _ in range(2):
+        cal._axis_act("cross", (-1, 0))
+    shot(cal, "cal2_axis")
+    cal._go(3)
+    cal._rows_act("step", "coarse")
+    cal._rows_act("offset", +1)
+    shot(cal, "cal3_rows")
     print("sent:", [c for c, _ in fake.sent][-6:])
     app.quit()
 
