@@ -1,0 +1,11 @@
+[project]
+name = "mirrorballs3"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "glfw>=2.10.1",
+    "moderngl>=5.12.0",
+    "numpy>=2.5.1",
+    "pillow>=12.3.0",
+]

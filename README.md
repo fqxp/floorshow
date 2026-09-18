@@ -1,0 +1,44 @@
+# mirrorballs3
+
+Computes the 2D image to feed a real video projector so that, once
+projected onto a real physical sphere placed in its light cone, chosen
+shapes appear to glow on the ball while everything else stays dark.
+
+See `~/.claude/plans/lexical-munching-blossom.md` for the full design
+(math derivation, shape model, rendering pipeline).
+
+## How it works
+
+- **`shapes.py`** -- shapes are defined purely as functions of direction
+  from the ball's center (a lat/lon-independent unit vector). Every
+  shape (filled circle, ring outline, latitude band, meridian band,
+  growing/moving circle) reduces to one primitive, `Annulus`: a center
+  direction plus an inner/outer angular radius, either of which can be
+  a callable of time for animation.
+- **`shaders/sphere.frag`** -- the actual per-pixel math, entirely on
+  the GPU: pixel -> ray (from the real projector's position/FOV) ->
+  ray-sphere intersection -> surface direction -> evaluate every active
+  shape at that direction -> composite. A ray that misses the ball is
+  just black -- that's the dark surrounding, nothing extra needed.
+- **`render.py`** -- moderngl setup (fullscreen quad + the shader),
+  `ProjectorConfig`/`BallConfig` for the real-world calibration
+  (throw distance, lens FOV, ball radius), and the per-frame uniform
+  upload. Python only ever computes a few floats per shape per frame;
+  it never touches a pixel.
+- **`demo.py`** -- a runnable visual sanity check: a centered circle, a
+  band sweeping from the north pole to the south pole, and a static
+  meridian band.
+
+## Run
+
+```sh
+mise exec -- uv run python demo.py
+```
+
+Opens fullscreen on the second monitor if one is connected (the real
+projector), otherwise a windowed preview. Esc quits.
+
+`demo.py`'s `ProjectorConfig` uses a close-in distance (1.2m) purely so
+the ball fills the preview window; swap in the real projector's
+measured position and lens FOV (throw distance ~3-5m) for the actual
+rig.
