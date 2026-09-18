@@ -1,0 +1,18 @@
+schema: 1
+name: Bars to poles
+description: Two bands leave the equator on every beat, fading red to green.
+tags: [beat, bars]
+params:                                      # controller UI later; placeholder label until then
+  width: {type: float, default: 8, min: 1, max: 30, unit: deg, label: Width}
+assets:
+  weave: ../assets/weave.jpg
+layers:
+  - id: bar
+    type: band
+    repeat: 2                                # gives i = 0, 1 and n = 2
+    lat: "(1 - 2*i) * 90 * ease_out(phase)"  # i=0 north, i=1 south
+    width: "param.width * (1 - 0.5*phase)"
+    snap: rows                               # light whole tile rows once rows are calibrated
+    color: "mix(red, green, phase)"
+    alpha: "1 - smoothstep(0.7, 1.0, phase)"
+    texture: {asset: weave, mapping: shape, scale: [8, 1], scroll: "beat * 0.25"}

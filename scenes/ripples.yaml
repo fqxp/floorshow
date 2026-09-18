@@ -1,0 +1,16 @@
+schema: 1
+name: Ripples
+description: Rings expand from the north pole, once around the hue wheel per bar-ish.
+tags: [bars, calm]
+tempo: {beats_per_bar: 4}
+transition:
+  in: {type: iris, beats: 2, ease: in_out}
+spin: {axis: y, deg: "fract(bar) * 360"}
+layers:
+  - type: ring
+    repeat: 4
+    at: {lat: 90, lon: 0}
+    radius: "fract(phase + i/n) * 90 * trans"
+    width: "3 + 4 * (1 - fract(phase + i/n))"
+    color: "hsv((beat + i/n) * 0.1, 1, 1)"
+    blend: add

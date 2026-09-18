@@ -1,0 +1,10 @@
+schema: 1
+name: Row stepper
+description: A three-row band climbs the ball one tile row at a time (needs row calibration to snap).
+tags: [bars, rows]
+layers:
+  - type: band
+    lat: "snap_row(-60 + 120 * fract(bar))"
+    width: "3 * tile"
+    color: "hsv(bar * 0.13, 1, 1)"
+    snap: rows

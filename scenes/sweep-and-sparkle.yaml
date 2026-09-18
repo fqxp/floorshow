@@ -1,0 +1,12 @@
+schema: 1
+name: Sweep and sparkle
+description: A meridian sweeps across once per bar while random sparkles change every beat.
+tags: [bars, sparkle]
+layers:
+  - {type: meridian, lon: "-90 + 180 * fract(bar)", width: 10, color: cyan, blend: add}
+  - type: circle
+    repeat: 12
+    at: {lat: "rand(floor(beat)*12 + i) * 140 - 70", lon: "rand(floor(beat)*12 + i + 99) * 160 - 80"}
+    radius: 2.5
+    alpha: "1 - phase"
+    color: white
