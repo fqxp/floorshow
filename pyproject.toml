@@ -9,6 +9,10 @@ dependencies = [
     "numpy>=2.5.1",
 ]
 
+[project.scripts]
+mirrorballs-render = "mirrorballs.render.app:main"
+mirrorballs-ctl = "mirrorballs.ctl.__main__:main"
+
 [project.optional-dependencies]
 # Output process (no GTK).
 render = [
