@@ -464,3 +464,35 @@ def test_calibration_against_a_live_renderer_core(app, tmp_path, monkeypatch):
         client.close()
         win.destroy()
         rig.close()
+
+
+def test_flash_limit_settings_and_banner(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    assert d.flash_sw.get_active() and d.flash_max.value == 3
+    d.flash_sw.set_active(False)
+    d.flash_max.set_value(5, notify=True)
+    d._flush()
+    s = load_config(tmp / "config.yaml").safety
+    assert (s.flash_limit, s.max_flashes_per_s) == (False, 5.0)
+    w.apply_state(st(flash=dict(enabled=True, limited=True, max_per_s=3.0)))
+    assert any("being dimmed" in t for t in texts(w.banner_box))
+    assert not any("Open in editor" in t for t in texts(w.banner_box))  # a notice, not an error: no button
+    w.apply_state(st(config_error="config.yaml: clock.bpm: too small"))
+    assert any("last good settings" in t for t in texts(w.banner_box)) and any("Open in editor" in t for t in texts(w.banner_box))
+
+
+def test_tapped_tempo_is_saved_once_tapping_stops(cfgwin):
+    w, fake, tmp = cfgwin
+    w.apply_state(st(clock=dict(st()["clock"], source="internal", bpm=84.136)))
+    w.act_tap()
+    w.act_tap()
+    assert [c for c, _ in fake.sent].count("tap") == 2 and w._tap_timer  # nothing is written while tapping
+    assert load_config(tmp / "config.yaml").clock.bpm == 120
+    w._persist_tempo()  # the settle timer firing
+    assert load_config(tmp / "config.yaml").clock.bpm == 84.1
+    # a MIDI clock owns the tempo: tapping never overwrites the configured internal BPM
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", bpm=128.0, port="X")))
+    w._persist_tempo()
+    assert load_config(tmp / "config.yaml").clock.bpm == 84.1

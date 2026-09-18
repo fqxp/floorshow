@@ -25,6 +25,7 @@ from .store import ConfigStore  # noqa: E402
 from .widgets import hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
 START_TIMEOUT_S = 12.0
+TAP_SETTLE_S = 2.5  # save the tapped tempo this long after the last tap
 
 
 class BeatTile(Gtk.DrawingArea):
@@ -89,6 +90,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._master_before_blackout = 0.85
         self._brightness_timer = 0
         self._pending_scene: str | None = None
+        self._tap_timer = 0
         self.config_dialog: Any = None
         self.calibration_window: Any = None
 
@@ -400,6 +402,24 @@ class MainWindow(Adw.ApplicationWindow):
 
     def act_tap(self) -> None:
         self.send("tap")
+        # Once the tapping stops, remember the tempo: the design says tap tempo sets the internal BPM.
+        if self._tap_timer:
+            GLib.source_remove(self._tap_timer)
+        self._tap_timer = GLib.timeout_add(int(TAP_SETTLE_S * 1000), self._persist_tempo)
+
+    def _persist_tempo(self) -> bool:
+        self._tap_timer = 0
+        clock = (self.state or {}).get("clock")
+        if not clock or clock["source"] != "internal":
+            return False  # a MIDI clock owns the tempo
+        bpm = round(clock["bpm"], 1)
+        if abs(bpm - self.store.load().clock.bpm) >= 0.05:
+            try:
+                self.store.update({"clock": {"bpm": bpm}})
+                self.cfg = self.store.load()
+            except Exception as e:  # noqa: BLE001
+                self.toast(f"Could not save the tempo: {e}")
+        return False
 
     def act_scene(self, sid: str) -> None:
         if self.connected and sid != (self.state or {}).get("scene"):
@@ -455,6 +475,8 @@ class MainWindow(Adw.ApplicationWindow):
             p = self.library.path_of(banner.scene_id)
             if p:
                 Gtk.FileLauncher.new(Gio.File.new_for_path(str(p))).launch(self, None, None)
+        elif banner.kind == "config_error":
+            Gtk.FileLauncher.new(Gio.File.new_for_path(str(self.store.path))).launch(self, None, None)
         elif banner.kind == "calibrating":
             if self.calibration_window:
                 self.calibration_window.present()
@@ -764,9 +786,10 @@ class MainWindow(Adw.ApplicationWindow):
                                                                       "banner-title" if b.kind == "calibrating" else "",
                                                                       hexpand=True, wrap=True), valign=Gtk.Align.CENTER)
             row.get_first_child().add_css_class("banner-icon")
-            btn = push_button(b.action)
-            btn.connect("clicked", lambda _b, b=b: self.act_banner(b))
-            row.append(btn)
+            if b.action:
+                btn = push_button(b.action)
+                btn.connect("clicked", lambda _b, b=b: self.act_banner(b))
+                row.append(btn)
             row.add_css_class("banner")
             self.banner_box.append(row)
 

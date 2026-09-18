@@ -53,6 +53,11 @@ def test_banners():
     assert b[0].kind == "scene_error" and b[0].scene_id == "strobe-grid" and b[0].text.startswith("strobe-grid.yaml · ")
     both = banners(True, state(calibrating=True, clock=clock(locked=False)))
     assert [x.kind for x in both] == ["calibrating", "midi_lost"]
+    b = banners(True, state(config_error="/x/config.yaml: clock.bpm: Input should be greater than or equal to 20"))
+    assert b[0].kind == "config_error" and "last good settings" in b[0].text and b[0].action == "Open in editor"
+    b = banners(True, state(flash=dict(enabled=True, limited=True, max_per_s=3.0)))
+    assert b[0].kind == "flash_limited" and b[0].action is None and "3 times a second" in b[0].text
+    assert banners(True, state(flash=dict(enabled=True, limited=False, max_per_s=3.0))) == []
     # an internal clock is never "lost"
     assert banners(True, state(clock=clock(source="internal", locked=True))) == []
 

@@ -112,6 +112,11 @@ class Bindings(_Base):
     keys: dict[str, str] = {}  # controller-side keyboard: key -> scene id or action
 
 
+class SafetyConfig(_Base):
+    flash_limit: bool = True  # dim the output when it flashes more often than allowed (photosensitivity)
+    max_flashes_per_s: float = Field(3.0, ge=0.5, le=10)
+
+
 class Config(_Base):
     schema_version: int = Field(SCHEMA_VERSION, alias="schema")
     clock: ClockConfig = ClockConfig()
@@ -120,6 +125,7 @@ class Config(_Base):
     director: DirectorConfig = DirectorConfig()
     midi: MidiConfig = MidiConfig()
     bindings: Bindings = Bindings()
+    safety: SafetyConfig = SafetyConfig()
 
 
 def _yaml() -> YAML:

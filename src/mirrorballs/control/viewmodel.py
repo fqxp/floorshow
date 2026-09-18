@@ -50,10 +50,10 @@ def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, flo
 
 @dataclass(frozen=True)
 class Banner:
-    kind: str  # "midi_lost" | "scene_error" | "calibrating"
+    kind: str  # "midi_lost" | "scene_error" | "config_error" | "flash_limited" | "calibrating"
     title: str
     text: str
-    action: str  # button label
+    action: str | None  # button label; None = a plain notice
     scene_id: str | None = None
 
 
@@ -63,6 +63,13 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
     out: list[Banner] = []
     if state.get("calibrating"):
         out.append(Banner("calibrating", "Calibration in progress", "Calibration in progress", "Show window"))
+    flash = state.get("flash") or {}
+    if flash.get("limited"):
+        out.append(Banner("flash_limited", "Flash limiter",
+                          f"The output is flashing more than {flash['max_per_s']:g} times a second, so it is being dimmed.", None))
+    if state.get("config_error"):
+        out.append(Banner("config_error", "Configuration error",
+                          f"config.yaml is invalid, so the last good settings are in use. {state['config_error']}", "Open in editor"))
     clock = state["clock"]
     if clock["source"] == "midi" and not clock["locked"]:
         out.append(Banner("midi_lost", "MIDI clock lost",

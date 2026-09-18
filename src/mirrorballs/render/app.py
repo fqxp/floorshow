@@ -16,6 +16,7 @@ from ..common import paths
 from .core import Core
 from .dispatch import pump
 from .frame import FrameSpec, draw
+from .inhibit import IdleInhibitor
 from .ipc_server import AlreadyRunning, IpcServer
 from .midi import MidiManager
 
@@ -71,12 +72,17 @@ def main(argv: list[str] | None = None) -> int:
 
     from .gl import GlPipeline
 
+    # The idle inhibitor forks a child, so it must start before any thread does.
+    inhibitor = IdleInhibitor()
+    inhibitor.start()
+
     inbox: SimpleQueue = SimpleQueue()
     ipc = IpcServer(paths.socket_path(), inbox)
     try:
         ipc.start()
     except AlreadyRunning as e:
         print(f"mirrorballs-render: {e}", file=sys.stderr)
+        inhibitor.stop()
         return 1
 
     if not glfw.init():
@@ -160,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     last = time.monotonic()
     failed_msg = ""
     next_window_probe = 0.0
+    frame_no = 0
     try:
         while not glfw.window_should_close(window) and not core.quit_requested:
             glfw.poll_events()
@@ -180,7 +187,11 @@ def main(argv: list[str] | None = None) -> int:
                     log.exception("frame evaluation failed")
                     failed_msg = str(e)
                 spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
-            draw(pipe, spec, ctx.screen)
+            frame_no += 1
+            lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0)  # 30 Hz sampling still sees 15 Hz flashing
+            if lum is not None:
+                with lock:
+                    core.observe_luminance(now, lum)
             glfw.swap_buffers(window)
 
             dt = time.monotonic() - last
@@ -195,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         control.join(2)
         midi.close()
         ipc.stop()
+        inhibitor.stop()
         glfw.terminate()
     return 0
 

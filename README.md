@@ -29,6 +29,19 @@ gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "['<Super>F11']
 Config lives in `~/.config/mirrorballs/config.yaml`, scenes in `~/.config/mirrorballs/scenes/*.yaml`
 (bundled examples in `scenes/`). Both are hot-reloaded. Fake a MIDI clock with
 `uv run python tools/midi_clock.py --bpm 128`, then set `clock: {source: midi, midi_port: "mirrorballs test clock"}`.
+**Safety.** Flashing light thrown around a room can harm people who are sensitive to it, so the renderer limits
+it by default: if the output flashes more than 3 times a second (a flash is a pair of opposing brightness
+changes of 10 % or more, measured on the ball before master brightness), it dims itself until it stops,
+and the controller shows a notice. Tune or disable it in the configuration dialog (Output tab) or in
+`config.yaml`:
+
+```yaml
+safety: {flash_limit: true, max_flashes_per_s: 3}
+```
+
+The renderer also holds a GNOME idle inhibitor while it runs, so the screen does not blank mid-show. It is
+released when the renderer exits, even if it is killed.
+
 Only the projector-facing hemisphere of the ball is lit, so keep scene longitudes within about -90..90.
 
 ---

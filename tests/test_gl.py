@@ -166,3 +166,35 @@ def test_texture_modulates_colour(gl, tmp_path):
     assert lit.size > 500 and lit.max() > 200 and len(np.unique(lit)) > 10  # stripes: many levels
     plain = render(gl, [shape(center=(0.0, 1.0, 0.0), inner=math.radians(40), outer=math.radians(70))], CAL)
     assert (plain[..., 0] > 0).sum() > (img[..., 0] > 0).sum()  # dark stripes remove light
+
+
+def test_mean_luminance_of_the_ball_is_measured_from_the_scene_before_master(gl):
+    from mirrorballs.render.frame import FrameSpec, SlotSpec, draw
+
+    pipe, dest = gl
+    white = SlotSpec([shape(color=(1, 1, 1))])
+    dim = SlotSpec([shape(color=(0.5, 0.5, 0.5))])
+    half = SlotSpec([shape(center=(0.0, 1.0, 0.0), outer=math.pi / 2, color=(1, 1, 1))])  # the upper half of the ball
+    lum = lambda slot, master=1.0: draw(pipe, FrameSpec(cal=CAL, incoming=slot, master=master), dest, measure=True)
+    assert lum(white) == pytest.approx(1.0, abs=0.02)  # a fully lit ball reads as 1.0 even though it fills ~40 % of the frame
+    assert lum(dim) == pytest.approx(0.5, abs=0.02)
+    assert lum(white, master=0.2) == pytest.approx(1.0, abs=0.02)  # master brightness does not change the measurement
+    assert lum(half) == pytest.approx(0.5, abs=0.06)
+    assert draw(pipe, FrameSpec(cal=CAL, incoming=white), dest, measure=False) is None
+    black = FrameSpec(cal=CAL, incoming=None, black=True)
+    assert draw(pipe, black, dest, measure=True) is None
+
+
+@pytest.mark.parametrize("size", [(320, 180), (1280, 720), (1920, 1080), (1000, 777)])
+def test_measured_luminance_is_exact_at_any_frame_size(gl, size):
+    """Regression: a mip-chain average was 0.76 (1280x720) or 3.2x too high (1920x1080) because
+    non power-of-two mipmaps are not box averages."""
+    from mirrorballs.render.frame import FrameSpec, SlotSpec, draw
+
+    pipe = GlPipeline(gl[0].ctx)
+    pipe.set_size(*size)
+    dest = gl[0].ctx.framebuffer(color_attachments=[gl[0].ctx.texture(size, 4)])
+    cal = Calibration.default(size[0] / size[1])
+    for color, expect in (((1, 1, 1), 1.0), ((0.5, 0.5, 0.5), 0.5), ((1, 0, 0), 0.2126)):
+        got = draw(pipe, FrameSpec(cal=cal, incoming=SlotSpec([shape(color=color)])), dest, measure=True)
+        assert got == pytest.approx(expect, abs=0.03), (size, color)

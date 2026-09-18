@@ -401,6 +401,17 @@ class ConfigDialog(Adw.Window):
         row.add_css_class("setting-row")
         g2.add(row)
         page.append(g2)
+        safety = SettingsGroup("Safety")
+        sc = self.cfg.safety
+        self.flash_sw = Gtk.Switch(active=sc.flash_limit, valign=Gtk.Align.CENTER)
+        self.flash_sw.add_css_class("mb-switch")
+        self.flash_sw.connect("notify::active", lambda s, _p: self.save("safety", {"flash_limit": s.get_active()}))
+        self.flash_max = Stepper(sc.max_flashes_per_s, 1, 10, 1, lambda v: f"<b>{v:.0f}</b> / s",
+                                 lambda v: self.save("safety", {"max_flashes_per_s": v}))
+        safety.add(setting_row("Limit flashing", "Dims the output when it flashes too often, so strobing scenes cannot harm anyone "
+                               "sensitive to flashing light. Turn it off only if you know your audience.", self.flash_sw))
+        safety.add(setting_row("Flashes allowed per second", "Guidelines recommend at most 3.", self.flash_max))
+        page.append(safety)
         note = hbox(12, icon("dialog-information-symbolic", 18), label(
             "The output window is moved to the projector and made fullscreen with GNOME: Super + Shift + ← → changes monitor, F11 toggles fullscreen.",
             "secondary", wrap=True, hexpand=True))

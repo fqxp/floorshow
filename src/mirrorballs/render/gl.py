@@ -24,6 +24,8 @@ MAX_TEXTURES = 8
 BLEND_ID = {"over": 0, "add": 1, "multiply": 2, "screen": 3}
 TRANSITION_ID = {"cut": 0, "crossfade": 1, "wipe_lat": 2, "iris": 3, "flash": 4}
 FLOATS_PER_SHAPE = 20  # 5 vec4
+MEASURE_GRID = 16
+MEASURE_TAPS = 16
 
 
 @dataclass
@@ -88,6 +90,9 @@ class GlPipeline:
         self.scene_prog["Shapes"].binding = 0
         self.ubo.bind_to_uniform_block(0)
 
+        self._measure_prog = ctx.program(vertex_shader=vert, fragment_shader=(SHADERS / "measure.frag").read_text())
+        self._measure_vao = ctx.vertex_array(self._measure_prog, [(quad, "2f", "in_position")])
+        self._measure_fbo = ctx.framebuffer(color_attachments=[ctx.texture((MEASURE_GRID, MEASURE_GRID), 4)])
         self._dummy_tex = ctx.texture_array((1, 1, 1), 3, bytes(3))
         self._tex_cache: dict[tuple, moderngl.TextureArray] = {}
         self.size = (0, 0)
@@ -193,6 +198,22 @@ class GlPipeline:
         p["u_lineLevels"].value = ov.levels
         p["u_grid"].value = 1 if ov.grid else 0
         self.comp_vao.render(moderngl.TRIANGLE_STRIP)
+
+    def mean_rgb(self, slot: int) -> tuple[float, float, float]:
+        """Average colour (0..1) of a scene target over the whole frame.
+
+        A small reduction pass (16 x 16 cells, 16 x 16 taps each) is read back instead of the frame.
+        A mip chain would be cheaper but is not a true average for non power-of-two sizes such as 1920 x 1080."""
+        tex = self.targets[slot][0]
+        self._measure_fbo.use()
+        self.ctx.viewport = (0, 0, MEASURE_GRID, MEASURE_GRID)
+        tex.use(location=0)
+        self._measure_prog["u_src"].value = 0
+        self._measure_prog["u_taps"].value = MEASURE_TAPS
+        self._measure_prog["u_grid"].value = float(MEASURE_GRID)
+        self._measure_vao.render(moderngl.TRIANGLE_STRIP)
+        px = np.frombuffer(self._measure_fbo.read(components=3), dtype=np.uint8).reshape(-1, 3).mean(axis=0) / 255.0
+        return float(px[0]), float(px[1]), float(px[2])
 
     def read_rgb(self, fbo: moderngl.Framebuffer) -> np.ndarray:
         """Pixels of ``fbo`` as an (H, W, 3) uint8 array, top row first (for tests)."""
