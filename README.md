@@ -43,6 +43,13 @@ safety: {flash_limit: true, max_flashes_per_s: 3}
 The renderer also holds a GNOME idle inhibitor while it runs, so the screen does not blank mid-show. It is
 released when the renderer exits, even if it is killed.
 
+**If the output window misbehaves.** The renderer is a normal window: nothing special except that it can go
+fullscreen. Its main thread only pumps window events; a separate thread renders and presents frames, so a
+blocked swap can never stop the window from answering the compositor. If frames stop anyway, the controller
+shows a banner, and the renderer writes every thread's Python stack to `~/.local/state/mirrorballs/render.stacks`
+(also on demand: `kill -USR1 <pid>`). `render.log` records window focus/minimise events, blocked swaps and
+every command with the client that sent it. `tools/swap_stall_repro.py` compares the two loop structures.
+
 Only the projector-facing hemisphere of the ball is lit, so keep scene longitudes within about -90..90.
 
 ---

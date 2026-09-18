@@ -412,25 +412,11 @@ class ConfigDialog(Adw.Window):
                                "sensitive to flashing light. Turn it off only if you know your audience.", self.flash_sw))
         safety.add(setting_row("Flashes allowed per second", "Guidelines recommend at most 3.", self.flash_max))
         page.append(safety)
-        self.top_sw = Gtk.Switch(active=self.cfg.output.x11, valign=Gtk.Align.CENTER)
-        self.top_sw.add_css_class("mb-switch")
-        self.top_sw.connect("notify::active", lambda s, _p: self._on_keep_on_top(s.get_active()))
-        g2b = SettingsGroup("Keep on top")
-        g2b.add(setting_row("Keep the output window on top",
-                            "GNOME only shows a fullscreen window while it has focus. In this mode the output runs through "
-                            "XWayland, where a window can stay above the others. Takes effect the next time the renderer starts.",
-                            self.top_sw))
-        page.append(g2b)
         note = hbox(12, icon("dialog-information-symbolic", 18), label(
             "The output window is moved to the projector and made fullscreen with GNOME: Super + Shift + ← → changes monitor, F11 toggles fullscreen.",
             "secondary", wrap=True, hexpand=True))
         note.add_css_class("note-box")
         page.append(note)
-
-    def _on_keep_on_top(self, on: bool) -> None:
-        self.save("output", {"x11": on, "always_on_top": True})
-        if self.main.connected:
-            self.main.toast("Restart the renderer (Quit renderer, then Start) to apply.")
 
     def _toggle_test_pattern(self) -> None:
         on = not (self.main.state or {}).get("test_pattern", False)

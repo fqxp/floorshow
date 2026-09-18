@@ -14,13 +14,13 @@ from queue import SimpleQueue
 from typing import Any
 
 from ..common import paths
-from ..common.config import ConfigError, load_config
 from .core import Core
 from .dispatch import pump
 from .frame import FrameSpec, draw
 from .inhibit import IdleInhibitor
 from .ipc_server import AlreadyRunning, IpcServer
 from .midi import MidiManager
+from .watchdog import StallWatchdog, file_dumper, install_signal_dump
 
 log = logging.getLogger("mirrorballs.render")
 STATE_HZ = 30.0
@@ -40,17 +40,6 @@ def _setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO, handlers=handlers,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-
-
-def wants_x11(config_path: Path, cli_flag: bool) -> bool:
-    """X11 (XWayland) mode from the command line or config.yaml. Decided before GLFW is imported, because the
-    GLFW build (native Wayland or X11) is chosen at import time."""
-    if cli_flag or os.environ.get("MIRRORBALLS_X11") == "1":
-        return True
-    try:
-        return load_config(config_path).output.x11
-    except ConfigError:
-        return False
 
 
 def probe_window(glfw, window, fw: int, fh: int) -> dict:
@@ -77,15 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, default=None, help="config.yaml (default: ~/.config/mirrorballs/config.yaml)")
     ap.add_argument("--scenes", type=Path, action="append", default=[], help="extra scene directory (repeatable)")
     ap.add_argument("--size", default="1280x720", help="initial window size, WxH")
-    ap.add_argument("--x11", action="store_true", help="run through XWayland so the window can stay on top")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     _setup_logging(args.verbose)
 
     config_path = args.config or paths.config_file()
-    x11 = wants_x11(config_path, args.x11)
-    if x11:
-        os.environ["PYGLFW_LIBRARY_VARIANT"] = "x11"  # must be set before glfw is imported
     import glfw
     import moderngl
 
@@ -111,12 +96,6 @@ def main(argv: list[str] | None = None) -> int:
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
     glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-    on_top = False
-    try:
-        on_top = x11 and load_config(config_path).output.always_on_top
-    except ConfigError:
-        pass
-    glfw.window_hint(glfw.FLOATING, on_top)  # honoured on X11 only; Wayland has no such request
     w, h = (int(x) for x in args.size.lower().split("x"))
     window = glfw.create_window(w, h, TITLE, None, None)
     if not window:
@@ -124,8 +103,6 @@ def main(argv: list[str] | None = None) -> int:
         glfw.terminate()
         ipc.stop()
         return 1
-    glfw.make_context_current(window)
-    glfw.swap_interval(1)  # vsync: one frame per display refresh is the render tick
     glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
 
     def toggle_fullscreen(win: Any, key: int, _sc: int, action: int, _mods: int) -> None:
@@ -141,26 +118,33 @@ def main(argv: list[str] | None = None) -> int:
             mode = glfw.get_video_mode(m)
             glfw.set_window_monitor(win, m, 0, 0, mode.size.width, mode.size.height, mode.refresh_rate)
 
+    fb = {"size": glfw.get_framebuffer_size(window)}  # kept current by the callback; the render thread must not call GLFW queries
+
     glfw.set_key_callback(window, toggle_fullscreen)
-    # Window events go to the log: when the output "disappears", this is the evidence (focus lost? iconified?).
+    glfw.set_framebuffer_size_callback(window, lambda _w, fw, fh: fb.__setitem__("size", (fw, fh)))
+    # Window events go to the log, so a window that misbehaves leaves evidence (focus lost? iconified?).
     glfw.set_window_focus_callback(window, lambda _w, focused: log.info("window %s", "focused" if focused else "lost focus"))
     glfw.set_window_iconify_callback(window, lambda _w, iconified: log.info("window %s", "iconified" if iconified else "restored"))
     glfw.set_window_size_callback(window, lambda _w, sw, sh: log.info("window size %dx%d", sw, sh))
-    glfw.set_window_refresh_callback(window, lambda _w: log.debug("window refresh requested"))
 
-    ctx = moderngl.create_context()
-    pipe = GlPipeline(ctx)
-    log.info("GL: %s | %s | platform %s%s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"],
-             "X11 (XWayland)" if x11 else "native (Wayland)", ", always on top" if on_top else "")
     core = Core(config_path, [*paths.scene_dirs(), *args.scenes], now=time.monotonic())
     midi = MidiManager(inbox)
-    log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
+    try:  # stall stacks and the SIGUSR1 dump go to a file next to the log
+        dump_stream = open(paths.log_file().with_suffix(".stacks"), "a", buffering=1)
+        install_signal_dump(dump_stream)
+        watchdog = StallWatchdog(file_dumper(dump_stream))
+    except OSError:
+        watchdog = StallWatchdog(lambda _h: None)
 
-    # Two threads, one lock. The control thread (IPC, MIDI, director, files, state stream) never
-    # waits for the display: swap_buffers can block for a long time when the compositor throttles
-    # frame callbacks (occluded window, projector asleep), and control must not stall with it.
+    # Three threads, one lock.
+    #  main    : nothing but window events. On Wayland the compositor talks to a client through events that are
+    #            only handled while they are pumped, so this thread must never block on anything.
+    #  render  : owns the GL context and presents frames. swap_buffers blocks while the compositor does not
+    #            want frames (vsync, window hidden), and that is harmless here because events keep flowing.
+    #  control : IPC, MIDI, director, files, state stream. Never waits for the display either.
     lock = threading.Lock()
     stop = threading.Event()
+    render_failed = threading.Event()
 
     def control_loop() -> None:
         next_state = 0.0
@@ -181,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
                         state = core.state(now)
                         next_state = now + 1.0 / STATE_HZ
                     events = core.take_outbox()
+                    out = core.output_state(now)
+                watchdog.check(now, out["presenting"], out["stalled_s"])
                 if state is not None:
                     ipc.broadcast(state)
                 for ev in events:
@@ -189,59 +175,81 @@ def main(argv: list[str] | None = None) -> int:
                 log.exception("control loop error")
             stop.wait(CONTROL_TICK_S)
 
-    control = threading.Thread(target=control_loop, name="control", daemon=True)
-    control.start()
-
-    last = time.monotonic()
-    failed_msg = ""
-    next_window_probe = 0.0
-    frame_no = 0
-    try:
-        while not glfw.window_should_close(window) and not core.quit_requested:
-            glfw.poll_events()
-            now = time.monotonic()
-            fw, fh = glfw.get_framebuffer_size(window)
-            if fw <= 0 or fh <= 0:  # minimised
-                time.sleep(0.05)
-                continue
-            pipe.set_size(fw, fh)
-            if now >= next_window_probe:
-                next_window_probe = now + 1.0
-                core.window = probe_window(glfw, window, fw, fh)
+    def render_loop() -> None:
+        try:
+            glfw.make_context_current(window)
+            glfw.swap_interval(1)  # vsync: one frame per display refresh is the render tick
+            ctx = moderngl.create_context()
+            pipe = GlPipeline(ctx)
+            log.info("GL: %s | %s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"])
+            log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
+            last, failed_msg, frame_no = time.monotonic(), "", 0
+            while not stop.is_set():
+                now = time.monotonic()
+                fw, fh = fb["size"]
+                if fw <= 0 or fh <= 0:  # minimised
+                    time.sleep(0.05)
+                    continue
+                pipe.set_size(fw, fh)
+                try:
+                    with lock:
+                        spec = core.frame(now, fw / fh)
+                except Exception as e:  # noqa: BLE001 - a scene bug must never stop the show
+                    if str(e) != failed_msg:
+                        log.exception("frame evaluation failed")
+                        failed_msg = str(e)
+                    spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
+                frame_no += 1
+                lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0)  # 30 Hz sampling still sees 15 Hz flashing
+                if lum is not None:
+                    with lock:
+                        core.observe_luminance(now, lum)
+                swap_start = time.monotonic()
+                glfw.swap_buffers(window)
+                swapped = time.monotonic()
+                core.frame_heartbeat = swapped
+                if swapped - swap_start > SWAP_STALL_LOG_S:
+                    log.warning("swap_buffers blocked for %.1f s: the compositor was not asking for frames", swapped - swap_start)
+                dt = swapped - last
+                last = swapped
+                if dt > 0:
+                    core.fps = 0.9 * core.fps + 0.1 / dt if core.fps else 1.0 / dt
+        except Exception:  # noqa: BLE001
+            log.exception("render thread failed")
+            render_failed.set()
+        finally:
             try:
-                with lock:
-                    spec = core.frame(now, fw / fh)
-            except Exception as e:  # noqa: BLE001 - a scene bug must never stop the show
-                if str(e) != failed_msg:
-                    log.exception("frame evaluation failed")
-                    failed_msg = str(e)
-                spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
-            frame_no += 1
-            lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0)  # 30 Hz sampling still sees 15 Hz flashing
-            if lum is not None:
-                with lock:
-                    core.observe_luminance(now, lum)
-            swap_start = time.monotonic()
-            glfw.swap_buffers(window)  # blocks while the compositor withholds frame callbacks (window hidden or covered)
-            swapped = time.monotonic()
-            core.frame_heartbeat = swapped
-            if swapped - swap_start > SWAP_STALL_LOG_S:
-                log.warning("swap_buffers blocked for %.1f s: the compositor was not showing the output window "
-                            "(hidden, covered by another window, or on an output that was off)", swapped - swap_start)
+                glfw.make_context_current(None)
+            except Exception:  # noqa: BLE001
+                pass
 
-            dt = time.monotonic() - last
-            last = time.monotonic()
-            if dt > 0:
-                core.fps = 0.9 * core.fps + 0.1 / dt if core.fps else 1.0 / dt
+    control = threading.Thread(target=control_loop, name="control", daemon=True)
+    render = threading.Thread(target=render_loop, name="render", daemon=True)
+    control.start()
+    render.start()
+
+    next_probe = 0.0
+    try:
+        while not glfw.window_should_close(window) and not core.quit_requested and not render_failed.is_set():
+            glfw.wait_events_timeout(0.05)  # returns at once when an event arrives
+            now = time.monotonic()
+            if now >= next_probe:
+                next_probe = now + 1.0
+                core.window = probe_window(glfw, window, *fb["size"])
     except KeyboardInterrupt:
         pass
     finally:
         log.info("shutting down")
         stop.set()
+        render.join(2)
         control.join(2)
         midi.close()
         ipc.stop()
         inhibitor.stop()
+        if render.is_alive():  # still blocked in swap_buffers: tearing GLFW down under it could crash
+            log.warning("render thread did not stop; exiting without terminating GLFW")
+            logging.shutdown()
+            os._exit(0)
         glfw.terminate()
     return 0
 

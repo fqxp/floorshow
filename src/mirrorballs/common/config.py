@@ -117,13 +117,6 @@ class SafetyConfig(_Base):
     max_flashes_per_s: float = Field(3.0, ge=0.5, le=10)
 
 
-class OutputConfig(_Base):
-    # Run the output window through XWayland instead of native Wayland. Only there can a window ask to stay
-    # above others (GNOME on Wayland stops presenting an unfocused fullscreen window). Applies at renderer start.
-    x11: bool = False
-    always_on_top: bool = True  # only has an effect in X11 mode
-
-
 class Config(_Base):
     schema_version: int = Field(SCHEMA_VERSION, alias="schema")
     clock: ClockConfig = ClockConfig()
@@ -133,7 +126,6 @@ class Config(_Base):
     midi: MidiConfig = MidiConfig()
     bindings: Bindings = Bindings()
     safety: SafetyConfig = SafetyConfig()
-    output: OutputConfig = OutputConfig()
 
 
 def _yaml() -> YAML:

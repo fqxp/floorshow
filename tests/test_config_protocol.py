@@ -125,20 +125,3 @@ def test_reply_helpers():
     assert ok(3, x=1) == {"id": 3, "ok": True, "x": 1}
     assert error(3, "boom") == {"id": 3, "ok": False, "error": "boom"}
 
-
-def test_output_section_and_x11_decision(tmp_path, monkeypatch):
-    from mirrorballs.render.app import wants_x11
-
-    assert load_config(tmp_path / "none.yaml").output.x11 is False
-    p = tmp_path / "config.yaml"
-    assert wants_x11(p, False) is False  # no file
-    assert wants_x11(p, True) is True  # the command-line flag wins
-    p.write_text("output: {x11: true}\n")
-    assert wants_x11(p, False) is True and load_config(p).output.always_on_top is True
-    p.write_text("output: {x11: false}\n")
-    assert wants_x11(p, False) is False
-    monkeypatch.setenv("MIRRORBALLS_X11", "1")
-    assert wants_x11(p, False) is True
-    monkeypatch.delenv("MIRRORBALLS_X11")
-    p.write_text("output: {x11: [not, a, bool]}\n")
-    assert wants_x11(p, False) is False  # a broken config never prevents the renderer from starting
