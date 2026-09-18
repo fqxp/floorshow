@@ -76,13 +76,23 @@ class CalibrationEnd(_Cmd):
     commit: bool = False
 
 
+class TestPatternSet(_Cmd):
+    cmd: Literal["testpattern.set"]
+    on: bool
+
+
+class MidiLearn(_Cmd):
+    cmd: Literal["midi.learn"]
+    on: bool  # the next note / CC / program change on the control port is reported as a "midi_learned" event
+
+
 class Simple(_Cmd):
     cmd: Literal["reload", "quit", "tap", "sync_downbeat", "scene.next", "scene.prev"]
 
 
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | MasterSet
-    | CalibrationBegin | CalibrationPreview | CalibrationEnd | Simple,
+    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

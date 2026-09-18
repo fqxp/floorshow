@@ -22,69 +22,9 @@ from . import tokens, viewmodel as vm  # noqa: E402
 from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
 from .store import ConfigStore  # noqa: E402
+from .widgets import hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
 START_TIMEOUT_S = 12.0
-
-
-# --- small widget helpers ----------------------------------------------------------------
-
-
-def label(text: str = "", *classes: str, xalign: float = 0.0, wrap: bool = False, hexpand: bool = False) -> Gtk.Label:
-    lb = Gtk.Label(label=text, xalign=xalign, wrap=wrap, hexpand=hexpand)
-    for c in classes:
-        if c:
-            lb.add_css_class(c)
-    return lb
-
-
-def kbd(text: str) -> Gtk.Label:
-    lb = label(text, "kbd", xalign=0.5)
-    lb.set_valign(Gtk.Align.CENTER)
-    return lb
-
-
-def icon(name: str, size: int = 16) -> Gtk.Image:
-    im = Gtk.Image.new_from_icon_name(name)
-    im.set_pixel_size(size)
-    return im
-
-
-def hbox(spacing: int = 8, *children: Gtk.Widget, **kw: Any) -> Gtk.Box:
-    b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=spacing, **kw)
-    for c in children:
-        b.append(c)
-    return b
-
-
-def vbox(spacing: int = 8, *children: Gtk.Widget, **kw: Any) -> Gtk.Box:
-    b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing, **kw)
-    for c in children:
-        b.append(c)
-    return b
-
-
-def set_classes(widget: Gtk.Widget, on: dict[str, bool]) -> None:
-    for name, enabled in on.items():
-        if enabled:
-            widget.add_css_class(name)
-        else:
-            widget.remove_css_class(name)
-
-
-def push_button(text: str, *classes: str, kbd_text: str | None = None, icon_name: str | None = None) -> Gtk.Button:
-    b = Gtk.Button()
-    b.add_css_class("mb-btn")
-    for c in classes:
-        b.add_css_class(c)
-    row = hbox(8, halign=Gtk.Align.CENTER)
-    if icon_name:
-        row.append(icon(icon_name))
-    if text:
-        row.append(label(text))
-    if kbd_text:
-        row.append(kbd(kbd_text))
-    b.set_child(row)
-    return b
 
 
 class BeatTile(Gtk.DrawingArea):
@@ -149,6 +89,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._master_before_blackout = 0.85
         self._brightness_timer = 0
         self._pending_scene: str | None = None
+        self.config_dialog: Any = None
+        self.calibration_window: Any = None
 
         cfg = store.load()
         self.cfg = cfg
@@ -258,10 +200,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.manual_btn = Gtk.ToggleButton(label="Manual")
         self.random_btn = Gtk.ToggleButton(label="Random")
         self.random_btn.set_group(self.manual_btn)
-        seg = hbox(2, self.manual_btn, self.random_btn, valign=Gtk.Align.CENTER)
+        self.sequence_btn = Gtk.ToggleButton(label="Sequence")
+        self.sequence_btn.set_group(self.manual_btn)
+        seg = hbox(2, self.manual_btn, self.random_btn, self.sequence_btn, valign=Gtk.Align.CENTER)
         seg.add_css_class("segmented")
         self.manual_btn.connect("toggled", self._on_mode_toggled)
         self.random_btn.connect("toggled", self._on_mode_toggled)
+        self.sequence_btn.connect("toggled", self._on_mode_toggled)
         self.every_bars = 8
         self.every_label = label("", xalign=0.5)
         self.every_label.set_width_chars(11)  # fixed width: the stepper must not grow with its text
@@ -302,7 +247,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._fill_empty(
             self.empty_scenes, "view-grid-symbolic", "No scenes yet",
             "Add a scene to get started. Scenes are small files you can edit in any text editor.",
-            [("Reveal folder", self.act_reveal_folder)],
+            [("Add scene…", lambda: self.open_config("Scenes")), ("Reveal folder", self.act_reveal_folder)],
         )
         self.scene_stack = Gtk.Stack(vexpand=True)
         self.scene_stack.add_named(scroller, "grid")
@@ -406,7 +351,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _register_actions(self) -> None:
         for name, fn in (
-            ("config", lambda *_: self.toast("The configuration dialog is not built yet.")),
+            ("config", lambda *_: self.open_config()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
             ("shortcuts", lambda *_: self.show_shortcuts()),
             ("about", lambda *_: self.show_about()),
@@ -474,6 +419,28 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.toast("The renderer is not running.")
 
+    def open_config(self, tab: str | None = None) -> None:
+        from .config_dialog import ConfigDialog
+
+        if self.config_dialog is None:
+            self.config_dialog = ConfigDialog(self)
+        if tab:
+            self.config_dialog.show_tab(tab)
+        self.config_dialog.present()
+
+    def open_calibration(self) -> None:
+        from .calibration import CalibrationWindow
+
+        if self.calibration_window is not None:
+            self.calibration_window.present()
+            return
+        if not self.connected and not self.starting:
+            self.start_renderer()  # the window shows "Starting the renderer..." until it connects
+        self.calibration_window = CalibrationWindow(self)
+        self.calibration_window.present()
+        if self.state:
+            self.calibration_window.on_state(self.state)
+
     def act_reveal_folder(self) -> None:
         d = self.library.dirs[-1]
         d.mkdir(parents=True, exist_ok=True)
@@ -489,13 +456,18 @@ class MainWindow(Adw.ApplicationWindow):
             if p:
                 Gtk.FileLauncher.new(Gio.File.new_for_path(str(p))).launch(self, None, None)
         elif banner.kind == "calibrating":
-            self.toast("The calibration window is not built yet.")
+            if self.calibration_window:
+                self.calibration_window.present()
+            else:
+                self.toast("Another controller is calibrating.")
 
     def _on_mode_toggled(self, btn: Gtk.ToggleButton) -> None:
         if self._ui_guard or not btn.get_active():
             return  # state-driven changes and the button that just turned off send nothing
         if btn is self.random_btn:
             self.send("mode.set", mode="random", every={"bars": self.every_bars})
+        elif btn is self.sequence_btn:
+            self.send("mode.set", mode="sequence")
         else:
             self.send("mode.set", mode="manual")
 
@@ -551,6 +523,9 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.state = None
         self.refresh()
+        for w in (self.config_dialog, self.calibration_window):
+            if w:
+                w.on_connection(up)
 
     def apply_state(self, state: dict[str, Any], t: float | None = None) -> None:
         self.state = state
@@ -560,6 +535,13 @@ class MainWindow(Adw.ApplicationWindow):
         if self.library.refresh():
             self._cards_key = None
         self.refresh()
+        for w in (self.config_dialog, self.calibration_window):
+            if w:
+                w.on_state(state)
+
+    def apply_event(self, ev: dict[str, Any]) -> None:
+        if self.config_dialog:
+            self.config_dialog.on_event(ev)
 
     # --- rendering -----------------------------------------------------------------------
 
@@ -632,8 +614,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._cards_key = key
             self._rebuild_cards(ids, current)
         self.scene_stack.set_visible_child_name("grid" if ids else "empty")
-        self.manual_btn.set_active(mode != "random")
+        self.manual_btn.set_active(mode not in ("random", "sequence"))
         self.random_btn.set_active(mode == "random")
+        self.sequence_btn.set_active(mode == "sequence")
         if st and mode in ("random", "sequence"):
             self.every_bars = max(1, round(st["every_beats"] / st["clock"]["beats_per_bar"]))
         self.every_label.set_markup(f"Every <b>{self.every_bars}</b> bars")

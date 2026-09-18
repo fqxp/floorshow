@@ -35,6 +35,7 @@ class ClockConfig(_Base):
 
 class BallConfig(_Base):
     diameter_cm: float | None = None
+    tile_mm: float | None = Field(None, gt=0)  # starting value for calibration (with diameter_cm)
     row_pitch_deg: float | None = Field(None, gt=0)  # None: rows uncalibrated, tile = 4 deg, no snapping
     row_offset_deg: float = 0.0
     motor: dict[str, Any] | None = None  # reserved
@@ -47,6 +48,7 @@ class CalibrationConfig(_Base):
     bottom: float
     roll_deg: float = 0.0
     tilt_deg: float = 0.0
+    calibrated_at: str | None = None  # ISO timestamp, shown in the configuration dialog
 
     def to_calibration(self) -> Calibration:
         return Calibration(self.left, self.right, self.top, self.bottom, self.roll_deg, self.tilt_deg)
@@ -74,11 +76,18 @@ class TransitionConfig(_Base):
     beats: float = Field(1.0, ge=0)
 
 
+class SequenceItem(_Base):
+    scene: str
+    bars: int = Field(8, ge=1, le=64)
+
+
 class DirectorConfig(_Base):
     mode: Literal["manual", "random", "sequence"] = "manual"
     every: Every = Every(bars=8)
     no_repeat: bool = True
     pool: Pool = Pool()
+    sequence: list[SequenceItem] = []  # empty: sequence mode walks the scenes alphabetically every `every`
+    loop: bool = True
     transition: TransitionConfig = TransitionConfig()
 
 

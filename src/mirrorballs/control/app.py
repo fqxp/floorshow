@@ -41,7 +41,7 @@ class Application(Adw.Application):
         self._apply_theme()
 
         win = MainWindow(self, None, Library(), ConfigStore(), launch_renderer=start_renderer)
-        self.client = RendererClient(paths.socket_path(), win.apply_state, win.set_connection, win.toast)
+        self.client = RendererClient(paths.socket_path(), win.apply_state, win.set_connection, win.toast, win.apply_event)
         win.client = self.client
         self.window = win
         win.present()

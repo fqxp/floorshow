@@ -296,3 +296,73 @@ def test_tick_drives_the_director_without_any_frames(env):
     assert c.current == "b"
     c.tick(102.2)
     assert c.current == "b"  # same slot: no double switch
+
+
+def test_test_pattern_and_window_info(env):
+    c = make(env)
+    assert c.state(100.0)["window"] is None and not c.state(100.0)["test_pattern"]
+    c.window = {"width": 1920, "height": 1080, "fullscreen": True, "monitor": "HDMI-A-1"}
+    assert c.state(100.0)["window"]["monitor"] == "HDMI-A-1"
+    assert cmd(c, {"cmd": "testpattern.set", "on": True})["ok"]
+    f = c.frame(100.0)
+    assert f.incoming is None and f.overlay.grid and f.overlay.lines is not None
+    cmd(c, {"cmd": "testpattern.set", "on": False})
+    assert c.frame(100.0).incoming is not None
+
+
+def test_midi_learn_reports_the_next_control_message_without_acting_on_it(env):
+    c = make(env, "midi:\n  control_port: pad\n  map:\n    - {on: {note: 36}, do: {scene: b}}\n")
+    assert cmd(c, {"cmd": "midi.learn", "on": True})["ok"] and c.state(100.0)["learning"]
+    c.on_midi({"control"}, bytes([0x90, 36, 100]), 100.0)  # would switch to b, but is learned instead
+    assert c.current == "a" and not c.learn
+    assert c.take_outbox() == [{"event": "midi_learned", "on": {"note": 36, "ch": 1}}]
+    assert c.take_outbox() == []
+    cmd(c, {"cmd": "midi.learn", "on": True})
+    c.on_midi({"control"}, bytes([0xB2, 7, 64]), 100.0)
+    assert c.take_outbox() == [{"event": "midi_learned", "on": {"cc": 7, "ch": 3}}]
+    cmd(c, {"cmd": "midi.learn", "on": True})
+    c.on_midi({"control"}, bytes([0xC0, 5]), 100.0)
+    assert c.take_outbox()[0]["on"] == {"program": 5, "ch": 1}
+    c.on_midi({"control"}, bytes([0x90, 36, 100]), 100.0)  # learning is over: mappings work again
+    assert c.current == "b"
+
+
+def test_sequence_with_per_item_bars_and_loop(env):
+    cfg = ("clock: {bpm: 120, beats_per_bar: 4}\ndirector:\n  mode: sequence\n  loop: true\n  sequence:\n"
+           "    - {scene: c, bars: 2}\n    - {scene: a, bars: 1}\n    - {scene: nope, bars: 5}\n    - {scene: b, bars: 1}\n")
+    c = make(env, cfg)
+    c.tick(100.0)
+    assert c.current == "c"  # starts with the first item (unknown scenes are skipped)
+    c.tick(103.9)  # 2 bars = 16 beats = 8 s at 120 BPM... not yet
+    assert c.current == "c"
+    c.tick(108.1)
+    assert c.current == "a"
+    c.tick(110.2)  # 1 bar = 2 s
+    assert c.current == "b"
+    c.tick(112.3)
+    assert c.current == "c"  # looped
+    c.tick(112.4)
+    assert c.current == "c" and c.state(112.4)["sequence_index"] == 0
+
+
+def test_sequence_without_loop_stays_on_the_last_scene(env):
+    cfg = "clock: {bpm: 120}\ndirector:\n  mode: sequence\n  loop: false\n  sequence:\n    - {scene: a, bars: 1}\n    - {scene: b, bars: 1}\n"
+    c = make(env, cfg)
+    c.tick(100.0)
+    c.tick(102.1)
+    assert c.current == "b"
+    for t in (104.5, 110.0, 200.0):
+        c.tick(t)
+    assert c.current == "b"
+
+
+def test_sequence_restarts_the_item_when_the_beat_counter_jumps_back(env):
+    cfg = "clock: {source: midi, midi_port: x}\ndirector:\n  mode: sequence\n  sequence:\n    - {scene: a, bars: 2}\n    - {scene: b, bars: 2}\n"
+    c = make(env, cfg)
+    for k in range(80):
+        c.on_midi({"clock"}, bytes([0xF8]), 100.0 + k * 60 / (120 * 24))
+    c.tick(101.4)
+    assert c.current == "a"
+    c.on_midi({"clock"}, bytes([0xFA]), 102.0)  # Start: beat -> 0
+    c.tick(102.05)
+    assert c.current == "a" and c._seq_next is not None and c._seq_next <= 9.0  # 2 bars from ~0, not from the old position

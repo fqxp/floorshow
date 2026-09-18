@@ -242,3 +242,225 @@ def test_client_talks_to_a_live_renderer(app, tmp_path):
         assert got["conn"][-1] is False and not client.send("tap")
     finally:
         client.close()
+
+
+# --- configuration dialog and calibration window ---------------------------------------------
+
+from mirrorballs.common import paths  # noqa: E402
+from mirrorballs.common.config import load_config  # noqa: E402
+
+
+@pytest.fixture
+def cfgwin(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRRORBALLS_CONFIG_DIR", str(tmp_path / "cfg"))
+    bundled = scene_dir(tmp_path)
+    fake = FakeClient()
+    (tmp_path / "config.yaml").write_text("schema: 1\nmidi: {control_port: Pad}\n")
+    w = MainWindow(app, fake, Library([bundled, paths.user_scenes_dir()]), ConfigStore(tmp_path / "config.yaml"))
+    w.present()
+    w.set_connection(True)
+    w.apply_state(st(window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1")))
+    pump(150)
+    yield w, fake, tmp_path
+    for x in (w.config_dialog, w.calibration_window):
+        if x:
+            x.destroy()
+    w.destroy()
+
+
+def test_clock_and_timing_settings_are_saved_and_the_renderer_reloads(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    d.clock_seg.select("internal")
+    d._on_clock_source("internal")
+    d.bpm_entry.set_text("128")
+    d.bpb.set_value(3, notify=True)
+    d.offset.set_value(20, notify=True)
+    d.offset.set_value(25, notify=True)
+    d._flush()
+    c = load_config(tmp / "config.yaml").clock
+    assert (c.source, c.bpm, c.beats_per_bar, c.offset_ms) == ("internal", 128.0, 3, 25.0)
+    assert ("reload", {}) in fake.sent
+    d.bpm_entry.set_text("999")  # invalid values are flagged and never written
+    d._flush()
+    assert load_config(tmp / "config.yaml").clock.bpm == 128.0 and d.bpm_entry.has_css_class("error")
+
+
+def test_output_tab_shows_window_state_and_toggles_the_test_pattern(cfgwin):
+    w, fake, _ = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    assert "HDMI-A-1 · 1920 × 1080" in d.window_sub.get_text()
+    assert "Fullscreen" in texts(d.window_chip_box)
+    w.apply_state(st(window=dict(width=1280, height=720, fullscreen=False, monitor=None)))
+    assert "Windowed" in texts(d.window_chip_box)
+    d._toggle_test_pattern()
+    assert fake.sent[-1] == ("testpattern.set", {"on": True})
+    w.apply_state(st(test_pattern=True))
+    assert "Hide test pattern" in texts(d.test_btn)
+
+
+def test_midi_mapping_learn_flow(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    d._add_mapping()  # starts listening because a control port is configured and the renderer is connected
+    assert d.learn_row == 0 and d.learn_bar.get_visible() and ("midi.learn", {"on": True}) in fake.sent
+    w.apply_event({"event": "midi_learned", "on": {"note": 36, "ch": 10}})
+    assert d.learn_row is None and not d.learn_bar.get_visible()
+    d._set_action(0, {"scene": "beta"})
+    d._flush()
+    m = load_config(tmp / "config.yaml").midi.map
+    assert len(m) == 1 and (m[0].on.note, m[0].on.ch, m[0].do) == (36, 10, {"scene": "beta"})
+    d._remove_mapping(0)
+    d._flush()
+    assert load_config(tmp / "config.yaml").midi.map == []
+
+
+def test_director_ball_and_calibration_pages(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    d.every.set_value(4, notify=True)
+    d.no_repeat.set_active(False)
+    d._seq_add()
+    d._seq_set(0, scene="beta", bars=2)
+    d.d_step.set_value(40, notify=True)  # diameter 40 cm with 10 mm tiles
+    d._flush()
+    cfg = load_config(tmp / "config.yaml")
+    assert cfg.director.every.bars == 4 and cfg.director.no_repeat is False
+    assert [(s.scene, s.bars) for s in cfg.director.sequence] == [("beta", 2)]
+    assert cfg.ball.diameter_cm == 40 and cfg.ball.row_pitch_deg == pytest.approx(180 / (3.14159265 * 400 / 20), rel=0.02)
+    assert d.rows_step.value == 63  # rows follow the diameter (pi * 400 / 20)
+    d.rows_step.set_value(50, notify=True)  # and the tile size follows the rows
+    assert d.tile_step.value == round(3.14159265 * 400 / 100)
+    assert d.cal_centre.get_text() == "Not calibrated"
+    (tmp / "config.yaml").write_text("calibration: {left: 0.3, right: 0.7, top: 0.2, bottom: 0.8, calibrated_at: '2020-01-02T03:04'}\n")
+    d.cfg = w.store.load()
+    d._update_calibration()
+    assert (d.cal_centre.get_text(), d.cal_size.get_text()) == ("960, 540 px", "768 × 648 px")
+    assert d.cal_when.get_text() == "2 Jan, 03:04"
+
+
+def test_scene_file_operations(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    d._do_add("Fresh One")
+    assert d.selected_scene == "fresh-one" and "fresh-one" in w.library.scenes and d._is_user("fresh-one")
+    assert d.rename_btn.get_sensitive() and d.delete_btn.get_sensitive()
+    d._select("alpha")  # a bundled example: can be duplicated but not renamed or deleted
+    assert d.dup_btn.get_sensitive() and not d.rename_btn.get_sensitive() and not d.delete_btn.get_sensitive()
+    src = d._scene_path("alpha")
+    from mirrorballs.control import scene_files as sf
+
+    d._after_file_change(sf.duplicate_scene(src, paths.user_scenes_dir(), "Alpha copy", set(w.library.scenes)))
+    assert "alpha-copy" in w.library.scenes
+    sf.rename_scene(d._scene_path("alpha-copy"), "Renamed")
+    w.library.refresh()
+    assert w.library.scenes["alpha-copy"].name == "Renamed"
+    sf.delete_scene(d._scene_path("fresh-one"))
+    d._after_file_change(None)
+    assert "fresh-one" not in w.library.scenes
+    # a broken file shows up as an error row with its message
+    (paths.user_scenes_dir() / "broken.yaml").write_text("schema: 1\nname: x\nlayers:\n  - {type: band, lat: 0, widht: 3}\n")
+    d._after_file_change(None)
+    assert "broken" in w.library.errors and any("broken.yaml" in t for t in texts(d.scene_group))
+
+
+def test_calibration_window_flow_with_a_fake_renderer(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal.begun and ("calibration.begin", {}) in fake.sent
+    assert fake.sent[-1][0] == "calibration.preview" and fake.sent[-1][1]["left"] == pytest.approx(0.5 - 0.7 / 2 * 9 / 16)
+    s = cal.session
+    assert (s.width, s.height) == (1920, 1080) and not s.dirty and not cal.edited_chip.get_visible()
+    assert cal.read_centre.get_text() == "960, 540 px" and cal.read_size.get_text() == "756 × 756 px"
+    for key in ("a", "a", "3", "d"):
+        from mirrorballs.control.calibration_model import key_to_action
+
+        cal._act(*key_to_action(key))
+    assert s.dirty and cal.edited_chip.get_visible()
+    assert fake.sent[-1][0] == "calibration.preview" and fake.sent[-1][1]["active"] == "left"
+    assert s.step == "coarse"
+    cal._act("grid", None)
+    assert fake.sent[-1][1]["grid"] is True
+    fake.sent.clear()
+    cal.finish()
+    saved = load_config(tmp / "config.yaml").calibration
+    assert saved is not None and saved.left == pytest.approx(s.cal.left) and saved.calibrated_at
+    assert [c for c, _ in fake.sent] == ["calibration.end", "reload"] and fake.sent[0][1] == {"commit": True}
+    assert w.calibration_window is None
+
+
+def test_calibration_cancel_leaves_the_saved_values_alone(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._act("line", ("top", +1))
+    fake.sent.clear()
+    cal.cancel()
+    assert fake.sent == [("calibration.end", {"commit": False})]
+    assert load_config(tmp / "config.yaml").calibration is None and w.calibration_window is None
+
+
+def test_calibration_banners_for_starting_and_windowed_output(cfgwin):
+    w, fake, _ = cfgwin
+    w.apply_state(st(window=dict(width=1280, height=720, fullscreen=False, monitor=None)))
+    w.open_calibration()
+    cal = w.calibration_window
+    assert any("not fullscreen yet" in t for t in texts(cal.banner_box))
+    w.set_connection(False)
+    assert any("Starting the renderer" in t for t in texts(cal.banner_box)) and cal.session is None
+    assert not cal.finish_btn.get_sensitive()
+    cal.destroy()
+    w.calibration_window = None
+
+
+def test_calibration_against_a_live_renderer_core(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRRORBALLS_CONFIG_DIR", str(tmp_path / "cfg"))
+    rig = Rig(tmp_path)
+    got = {}
+    win = MainWindow(app, None, Library([tmp_path / "scenes"]), ConfigStore(tmp_path / "config.yaml"))
+    client = RendererClient(rig.sock, win.apply_state, win.set_connection, win.toast, win.apply_event)
+    win.client = client
+    client.start()
+    win.present()
+    try:
+        deadline = time.time() + 5
+        while not win.connected and time.time() < deadline:
+            pump(20)
+        rig.core.window = {"width": 1600, "height": 900, "fullscreen": True, "monitor": "X"}  # what the renderer app reports
+        deadline = time.time() + 5
+        while not (win.state and win.state.get("window")) and time.time() < deadline:
+            pump(20)
+        win.open_calibration()
+        cal = win.calibration_window
+        deadline = time.time() + 5
+        while not rig.core.state(time.monotonic())["calibrating"] and time.time() < deadline:
+            pump(20)
+        assert rig.core.state(time.monotonic())["calibrating"] and (cal.session.width, cal.session.height) == (1600, 900)
+        cal._act("step", "coarse")
+        for _ in range(5):
+            cal._act("move", (1, 0))
+        deadline = time.time() + 5
+        while rig.core._cal_preview is None or abs(rig.core._cal_preview["left"] - cal.session.cal.left) > 1e-9:
+            pump(20)
+            assert time.time() < deadline
+        f = rig.core.frame(time.monotonic())  # the renderer is showing the lines the window sent
+        assert f.overlay.lines[0] == pytest.approx(cal.session.cal.left)
+        assert "Calibration in progress" in "".join(texts(win.banner_box))
+        cal.finish()
+        deadline = time.time() + 5
+        while rig.core.state(time.monotonic())["calibrating"] and time.time() < deadline:
+            pump(20)
+        c = rig.core.calibration(None)
+        assert not rig.core.state(time.monotonic())["calibrating"]
+        assert c.left * 1600 == pytest.approx((0.5 - 0.7 / 2 * 9 / 16) * 1600 + 50, abs=0.01)  # moved 5 x 10 px
+        assert load_config(tmp_path / "config.yaml").calibration.left == pytest.approx(c.left)
+    finally:
+        client.close()
+        win.destroy()
+        rig.close()

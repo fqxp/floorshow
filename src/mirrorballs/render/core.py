@@ -58,6 +58,10 @@ class Core:
         self.fps = 0.0
         self.quit_requested = False
         self.midi_status: dict[str, Any] = {}  # filled by the app: which ports are open
+        self.window: dict[str, Any] | None = None  # filled by the app: size / fullscreen / monitor of the output window
+        self.test_pattern = False
+        self.learn = False  # MIDI learn: report the next control message instead of acting on it
+        self.outbox: list[dict[str, Any]] = []  # events for all clients, drained by the control loop
 
         self.config = Config()
         self.config_error: str | None = None
@@ -81,6 +85,9 @@ class Core:
         self.mode = "manual"
         self.every_beats = 32
         self._last_slot: int | None = None
+        self._seq_index = 0
+        self._seq_next: float | None = None  # beat at which the sequence advances; None = start on the next tick
+        self._seq_start = 0.0
 
         # calibration mode
         self.cal_owner: Any = None
@@ -163,6 +170,10 @@ class Core:
                 self.clock.use_internal(c.bpm, now)
         self._applied_clock = c
 
+    def take_outbox(self) -> list[dict[str, Any]]:
+        out, self.outbox = self.outbox, []
+        return out
+
     def midi_wants(self) -> tuple[str | None, str | None]:
         """(clock port substring or None, control port substring or None) the app should have open."""
         clock = self.config.clock.midi_port if self.config.clock.source == "midi" else None
@@ -199,6 +210,32 @@ class Core:
         if self._transition is None:
             self.previous = None
 
+    def _sequence(self) -> list:
+        return [i for i in self.config.director.sequence if i.scene in self.scenes]
+
+    def _sequence_step(self, snap, now: float) -> None:
+        """Play the configured sequence: each item for its own number of bars, optionally looping."""
+        items = self._sequence()
+        bpb = snap.beats_per_bar
+        if self._seq_next is None or self._seq_index >= len(items):
+            self._seq_index = 0
+            self.set_scene(items[0].scene, now)
+            self._seq_start, self._seq_next = snap.beat, snap.beat + items[0].bars * bpb
+            return
+        if snap.beat < self._seq_start:  # the beat counter jumped back (MIDI Start): restart the current item
+            self._seq_start, self._seq_next = snap.beat, snap.beat + items[self._seq_index].bars * bpb
+            return
+        if snap.beat < self._seq_next:
+            return
+        last = self._seq_index == len(items) - 1
+        if last and not self.config.director.loop:
+            self._seq_next = float("inf")  # stay on the last scene
+            return
+        self._seq_index = (self._seq_index + 1) % len(items)
+        item = items[self._seq_index]
+        self.set_scene(item.scene, now)
+        self._seq_start, self._seq_next = snap.beat, snap.beat + item.bars * bpb
+
     def _step(self, delta: int, now: float) -> None:
         ids = self.scene_ids()
         if ids:
@@ -214,6 +251,9 @@ class Core:
 
     def _director_step(self, snap, now: float) -> None:
         if self.mode == "manual" or self.cal_owner is not None:
+            return
+        if self.mode == "sequence" and self._sequence():
+            self._sequence_step(snap, now)
             return
         slot = int(snap.beat // self.every_beats)
         if self._last_slot is None:
@@ -270,6 +310,11 @@ class Core:
             if cmd.every:
                 self.every_beats = cmd.every.in_beats(self.clock.beats_per_bar)
             self._last_slot = None
+            self._seq_next = None
+        elif isinstance(cmd, P.TestPatternSet):
+            self.test_pattern = cmd.on
+        elif isinstance(cmd, P.MidiLearn):
+            self.learn = cmd.on
         elif isinstance(cmd, P.CalibrationBegin):
             self._begin_calibration(client)
         elif isinstance(cmd, P.CalibrationPreview):
@@ -370,6 +415,11 @@ class Core:
         d2 = data[2] if len(data) > 2 else 0
         if kind == 0x90 and d2 == 0:  # note-on with velocity 0 is a note-off
             return
+        if self.learn and kind in (0x90, 0xB0, 0xC0):
+            key = {0x90: "note", 0xB0: "cc", 0xC0: "program"}[kind]
+            self.outbox.append({"event": "midi_learned", "on": {key: d1, "ch": ch}})
+            self.learn = False
+            return
         for m in self.config.midi.map:
             trig = m.on
             if trig.ch is not None and trig.ch != ch:
@@ -445,6 +495,10 @@ class Core:
                                   levels=levels, grid=pv["grid"])  # type: ignore[arg-type]
             return FrameSpec(cal=cal_view, incoming=None, overlay=overlay)
 
+        if self.test_pattern:
+            return FrameSpec(cal=cal, incoming=None, black=True,
+                             overlay=Overlay(lines=(0.004, 0.996, 0.004, 0.996), levels=(0.6,) * 4, grid=True))
+
         self._director_step(snap, now)
 
         # blackout fade (dt-based and clamped, so a long display stall just completes it)
@@ -497,6 +551,10 @@ class Core:
             "master": self.master,
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
+            "test_pattern": self.test_pattern,
+            "learning": self.learn,
+            "sequence_index": self._seq_index if self.mode == "sequence" else None,
+            "window": self.window,
             "fps": round(self.fps, 1),
             "scene_errors": {sid: e.problems for sid, e in self.scene_errors.items()},
             "config_error": self.config_error,

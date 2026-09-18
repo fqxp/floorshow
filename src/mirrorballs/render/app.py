@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from queue import SimpleQueue
+from typing import Any
 
 from ..common import paths
 from .core import Core
@@ -35,6 +36,25 @@ def _setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO, handlers=handlers,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+def probe_window(glfw, window, fw: int, fh: int) -> dict:
+    """Size of the output window in pixels, and whether it covers a whole monitor.
+
+    GNOME (not GLFW) makes the window fullscreen, so GLFW cannot say so directly. A window whose
+    framebuffer matches a monitor's video mode is treated as fullscreen on that monitor."""
+    monitor_name, fullscreen = None, False
+    try:
+        for m in glfw.get_monitors():
+            mode = glfw.get_video_mode(m)
+            if mode and (mode.size.width, mode.size.height) == (fw, fh):
+                monitor_name, fullscreen = glfw.get_monitor_name(m), True
+                if isinstance(monitor_name, bytes):
+                    monitor_name = monitor_name.decode(errors="replace")
+                break
+    except Exception:  # noqa: BLE001 - purely informational
+        pass
+    return {"width": fw, "height": fh, "fullscreen": fullscreen, "monitor": monitor_name}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,6 +97,21 @@ def main(argv: list[str] | None = None) -> int:
     glfw.swap_interval(1)  # vsync: one frame per display refresh is the render tick
     glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
 
+    def toggle_fullscreen(win: Any, key: int, _sc: int, action: int, _mods: int) -> None:
+        """F11: fullscreen on the second monitor (normally the projector), or back to a window."""
+        if key != glfw.KEY_F11 or action != glfw.PRESS:
+            return
+        if glfw.get_window_monitor(win):
+            glfw.set_window_monitor(win, None, 100, 100, w, h, 0)
+            return
+        monitors = glfw.get_monitors()
+        if monitors:
+            m = monitors[1] if len(monitors) > 1 else monitors[0]
+            mode = glfw.get_video_mode(m)
+            glfw.set_window_monitor(win, m, 0, 0, mode.size.width, mode.size.height, mode.refresh_rate)
+
+    glfw.set_key_callback(window, toggle_fullscreen)
+
     ctx = moderngl.create_context()
     pipe = GlPipeline(ctx)
     log.info("GL: %s | %s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"])
@@ -96,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         next_state = 0.0
         while not stop.is_set():
             now = time.monotonic()
-            state = None
+            state, events = None, []
             try:
                 with lock:
                     pump(core, inbox, ipc, now)
@@ -110,8 +145,11 @@ def main(argv: list[str] | None = None) -> int:
                     if now >= next_state:
                         state = core.state(now)
                         next_state = now + 1.0 / STATE_HZ
+                    events = core.take_outbox()
                 if state is not None:
                     ipc.broadcast(state)
+                for ev in events:
+                    ipc.broadcast(ev)
             except Exception:  # noqa: BLE001 - keep controlling even if one iteration fails
                 log.exception("control loop error")
             stop.wait(CONTROL_TICK_S)
@@ -121,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
 
     last = time.monotonic()
     failed_msg = ""
+    next_window_probe = 0.0
     try:
         while not glfw.window_should_close(window) and not core.quit_requested:
             glfw.poll_events()
@@ -130,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(0.05)
                 continue
             pipe.set_size(fw, fh)
+            if now >= next_window_probe:
+                next_window_probe = now + 1.0
+                core.window = probe_window(glfw, window, fw, fh)
             try:
                 with lock:
                     spec = core.frame(now, fw / fh)

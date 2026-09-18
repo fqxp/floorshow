@@ -150,7 +150,7 @@ class Clock:
     # --- output --------------------------------------------------------------------------
 
     def snapshot(self, now: float) -> ClockSnapshot:
-        beat = self._beat_at(now + self.offset_s)
+        beat = self._beat_at(now - self.offset_s)  # positive offset = the beat is shown later
         if self.source == "internal":
             locked, status = True, "internal"
         else:

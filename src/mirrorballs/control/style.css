@@ -108,3 +108,32 @@ popover.menu contents { background: @bg2; border: 1px solid @line2; border-radiu
 popover.menu modelbutton { min-height: 40px; border-radius: 8px; padding: 0 12px; color: @t1; }
 popover.menu modelbutton:hover { background: @bg3; }
 toast { background: @bg3; color: @t1; border: 1px solid @line2; }
+
+/* settings rows (configuration dialog) */
+.group-title { font-size: 15px; font-weight: 700; }
+.group-card { background: @bg2; border: 1px solid @line; border-radius: 12px; }
+.setting-row { padding: 8px 14px; min-height: 56px; }
+.setting-row.row-sep { border-top: 1px solid @line; }
+.row-hint { color: @t3; font-size: 12.5px; }
+.tag.tag-ok { background: @acc_bg; border-color: @acc_line; color: @t1; }
+.tag.tag-warn { background: @amber_bg; border-color: @amber_line; color: @amber_t; }
+.dot-small { min-width: 8px; min-height: 8px; border-radius: 50%; background: @acc; }
+.tag-warn .dot-small { background: @amber; }
+.mono { font-family: monospace; }
+.tabs { background: @bg1; border-bottom: 1px solid @line; }
+.tabs button { background: transparent; background-image: none; border: 0; border-bottom: 3px solid transparent; border-radius: 0; box-shadow: none; color: @t2; min-height: 44px; font-size: 14px; }
+.tabs button:checked { color: @t1; font-weight: 700; border-bottom-color: @acc; }
+.tabs button:hover { background: @bg2; }
+entry.mb-entry, entry.mb-entry text { background: @bg0; color: @t1; }
+entry.mb-entry { border: 1px solid @line2; border-radius: 8px; box-shadow: none; min-height: 40px; padding: 0 10px; }
+.bpm-entry { font-size: 18px; font-weight: 700; }
+.note-box { background: @bg2; border: 1px solid @line; border-radius: 12px; padding: 12px 14px; color: @t2; }
+.error-detail { background: @amber_bg; border-top: 1px solid @amber_line; padding: 10px 14px 12px 50px; color: @amber_t; }
+.error-detail label { color: @amber_t; }
+.row-status { min-width: 24px; min-height: 24px; border-radius: 12px; background: @acc_bg; border: 1px solid @acc_line; color: @acc; }
+.row-status.bad { background: @amber_bg; border-color: @amber_line; color: @amber; }
+.setting-row.selected { box-shadow: inset 0 0 0 2px @acc; }
+.chip-toggle { background: @bg3; border: 1px solid @line2; border-radius: 15px; min-height: 30px; padding: 0 12px; color: @t2; box-shadow: none; background-image: none; }
+.chip-toggle:checked { background: @acc_bg; border-color: @acc_line; color: @t1; }
+.learn-bar { background: @acc_bg; border: 1px solid @acc_line; border-radius: 12px; padding: 10px 14px; }
+.amber-text { color: @amber_t; font-weight: 700; }

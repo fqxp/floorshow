@@ -27,9 +27,11 @@ class RendererClient:
         on_state: Callable[[dict[str, Any], float], None],
         on_connection: Callable[[bool], None],
         on_error: Callable[[str], None],
+        on_event: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.path = Path(path)
         self._on_state, self._on_connection, self._on_error = on_state, on_connection, on_error
+        self._on_event = on_event
         self._sock: socket.socket | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -99,6 +101,8 @@ class RendererClient:
             for msg in dec.feed(data):
                 if msg.get("event") == "state":
                     GLib.idle_add(self._deliver_state, msg, now)
+                elif "event" in msg and self._on_event is not None:
+                    GLib.idle_add(self._deliver_event, msg)
                 elif msg.get("ok") is True and "state" in msg:
                     GLib.idle_add(self._deliver_state, {"event": "state", **msg["state"]}, now)
                 elif msg.get("ok") is False:
@@ -106,6 +110,11 @@ class RendererClient:
 
     def _deliver_state(self, msg: dict[str, Any], t: float) -> bool:
         self._on_state(msg, t)
+        return False
+
+    def _deliver_event(self, msg: dict[str, Any]) -> bool:
+        if self._on_event:
+            self._on_event(msg)
         return False
 
     def _deliver_connection(self, up: bool) -> bool:

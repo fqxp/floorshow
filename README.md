@@ -2,7 +2,8 @@
 
 > **Work in progress: the app.** The demo below is being turned into a two-process app: a
 > projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
-> The controller's main window is built; its configuration dialog and calibration window are not yet.
+> The controller's main window, configuration dialog and calibration window (step 1, the silhouette) are built;
+> calibration steps 2-3 (ball axis, tile rows) and the motor are not.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
 ## The app
@@ -18,8 +19,8 @@ uv run --extra render --extra control pytest
 uv run --extra control python tools/screenshot_ui.py OUTDIR   # render the main window in each design state
 ```
 
-The output is a normal window: move it to the projector and make it fullscreen with GNOME. GNOME has no
-default fullscreen shortcut, so you can bind one:
+The output is a normal window: move it to the projector with Super+Shift+←/→ and press **F11** in it (fullscreen on
+the second monitor, best effort). If you prefer GNOME's own fullscreen, bind a shortcut:
 
 ```sh
 gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "['<Super>F11']"

@@ -34,8 +34,10 @@ def test_internal_bpm_change_keeps_beat_continuous():
     assert c.snapshot(4.3).beat == pytest.approx(before + 1.5)
 
 
-def test_offset_shifts_phase_earlier():
+def test_positive_offset_shows_the_beat_later():
     c = Clock(bpm=120, offset_ms=100, now=0.0)
+    assert c.snapshot(1.0).beat == pytest.approx(2.0 - 0.2)
+    c.set_offset_ms(-100)
     assert c.snapshot(1.0).beat == pytest.approx(2.0 + 0.2)
 
 

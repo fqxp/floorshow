@@ -62,7 +62,7 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
         return []
     out: list[Banner] = []
     if state.get("calibrating"):
-        out.append(Banner("calibrating", "Calibration in progress", "Other controls are disabled until it finishes.", "Show window"))
+        out.append(Banner("calibrating", "Calibration in progress", "Calibration in progress", "Show window"))
     clock = state["clock"]
     if clock["source"] == "midi" and not clock["locked"]:
         out.append(Banner("midi_lost", "MIDI clock lost",
