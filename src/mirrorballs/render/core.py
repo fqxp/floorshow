@@ -26,6 +26,7 @@ log = logging.getLogger("mirrorballs.core")
 
 FILE_POLL_S = 0.5
 FADE_S = 0.4  # blackout fade
+OUTPUT_STALL_S = 1.5  # no frame presented for this long: the window is hidden or covered
 DEFAULT_TILE_DEG = 4.0
 EASE = {
     "linear": lambda u: u,
@@ -61,6 +62,7 @@ class Core:
         self.guard = FlashGuard()
         self.midi_status: dict[str, Any] = {}  # filled by the app: which ports are open
         self.window: dict[str, Any] | None = None  # filled by the app: size / fullscreen / monitor of the output window
+        self.frame_heartbeat: float | None = None  # set by the render thread after every presented frame
         self.test_pattern = False
         self.learn = False  # MIDI learn: report the next control message instead of acting on it
         self.outbox: list[dict[str, Any]] = []  # events for all clients, drained by the control loop
@@ -177,6 +179,14 @@ class Core:
     def observe_luminance(self, now: float, luminance: float) -> None:
         """Feed the flash guard (render thread, under the core lock)."""
         self.guard.update(now, luminance)
+
+    def output_state(self, now: float) -> dict[str, Any]:
+        """Is the output window actually being presented? The render loop blocks in swap_buffers while GNOME
+        hides or covers the window, so a stale heartbeat means the projector is not showing our frames."""
+        if self.frame_heartbeat is None:
+            return {"presenting": True, "stalled_s": 0.0}
+        stalled = max(0.0, now - self.frame_heartbeat)
+        return {"presenting": stalled < OUTPUT_STALL_S, "stalled_s": round(stalled, 1)}
 
     def take_outbox(self) -> list[dict[str, Any]]:
         out, self.outbox = self.outbox, []
@@ -569,6 +579,7 @@ class Core:
             "learning": self.learn,
             "sequence_index": self._seq_index if self.mode == "sequence" else None,
             "window": self.window,
+            "output": self.output_state(now),
             "fps": round(self.fps, 1),
             "scene_errors": {sid: e.problems for sid, e in self.scene_errors.items()},
             "config_error": self.config_error,

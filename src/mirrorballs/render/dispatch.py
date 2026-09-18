@@ -5,8 +5,13 @@ from __future__ import annotations
 from queue import Empty, SimpleQueue
 from typing import Any, Protocol
 
+import logging
+
 from ..common import protocol as P
 from .core import Core
+
+log = logging.getLogger("mirrorballs.commands")
+QUIET = {"hello", "get_state", "calibration.preview", "param.set", "master.set"}  # too chatty to log each one
 
 
 class Sender(Protocol):
@@ -38,4 +43,6 @@ def pump(core: Core, inbox: SimpleQueue, ipc: Sender, now: float) -> int:
             except ValueError as e:
                 ipc.send(cid, P.error(msg.get("id"), str(e)))
                 continue
+            if cmd.cmd not in QUIET:
+                log.info("client %s: %s", cid, {k: v for k, v in msg.items() if k != "id"})
             ipc.send(cid, core.handle(cmd, cid, now))

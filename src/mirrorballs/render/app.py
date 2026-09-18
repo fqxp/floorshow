@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 import time
@@ -13,6 +14,7 @@ from queue import SimpleQueue
 from typing import Any
 
 from ..common import paths
+from ..common.config import ConfigError, load_config
 from .core import Core
 from .dispatch import pump
 from .frame import FrameSpec, draw
@@ -23,6 +25,7 @@ from .midi import MidiManager
 log = logging.getLogger("mirrorballs.render")
 STATE_HZ = 30.0
 CONTROL_TICK_S = 0.004
+SWAP_STALL_LOG_S = 0.5
 TITLE = "Mirrorballs Output"
 
 
@@ -37,6 +40,17 @@ def _setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO, handlers=handlers,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+def wants_x11(config_path: Path, cli_flag: bool) -> bool:
+    """X11 (XWayland) mode from the command line or config.yaml. Decided before GLFW is imported, because the
+    GLFW build (native Wayland or X11) is chosen at import time."""
+    if cli_flag or os.environ.get("MIRRORBALLS_X11") == "1":
+        return True
+    try:
+        return load_config(config_path).output.x11
+    except ConfigError:
+        return False
 
 
 def probe_window(glfw, window, fw: int, fh: int) -> dict:
@@ -63,10 +77,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, default=None, help="config.yaml (default: ~/.config/mirrorballs/config.yaml)")
     ap.add_argument("--scenes", type=Path, action="append", default=[], help="extra scene directory (repeatable)")
     ap.add_argument("--size", default="1280x720", help="initial window size, WxH")
+    ap.add_argument("--x11", action="store_true", help="run through XWayland so the window can stay on top")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     _setup_logging(args.verbose)
 
+    config_path = args.config or paths.config_file()
+    x11 = wants_x11(config_path, args.x11)
+    if x11:
+        os.environ["PYGLFW_LIBRARY_VARIANT"] = "x11"  # must be set before glfw is imported
     import glfw
     import moderngl
 
@@ -92,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
     glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+    on_top = False
+    try:
+        on_top = x11 and load_config(config_path).output.always_on_top
+    except ConfigError:
+        pass
+    glfw.window_hint(glfw.FLOATING, on_top)  # honoured on X11 only; Wayland has no such request
     w, h = (int(x) for x in args.size.lower().split("x"))
     window = glfw.create_window(w, h, TITLE, None, None)
     if not window:
@@ -117,12 +142,16 @@ def main(argv: list[str] | None = None) -> int:
             glfw.set_window_monitor(win, m, 0, 0, mode.size.width, mode.size.height, mode.refresh_rate)
 
     glfw.set_key_callback(window, toggle_fullscreen)
+    # Window events go to the log: when the output "disappears", this is the evidence (focus lost? iconified?).
+    glfw.set_window_focus_callback(window, lambda _w, focused: log.info("window %s", "focused" if focused else "lost focus"))
+    glfw.set_window_iconify_callback(window, lambda _w, iconified: log.info("window %s", "iconified" if iconified else "restored"))
+    glfw.set_window_size_callback(window, lambda _w, sw, sh: log.info("window size %dx%d", sw, sh))
+    glfw.set_window_refresh_callback(window, lambda _w: log.debug("window refresh requested"))
 
     ctx = moderngl.create_context()
     pipe = GlPipeline(ctx)
-    log.info("GL: %s | %s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"])
-
-    config_path = args.config or paths.config_file()
+    log.info("GL: %s | %s | platform %s%s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"],
+             "X11 (XWayland)" if x11 else "native (Wayland)", ", always on top" if on_top else "")
     core = Core(config_path, [*paths.scene_dirs(), *args.scenes], now=time.monotonic())
     midi = MidiManager(inbox)
     log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
@@ -192,7 +221,13 @@ def main(argv: list[str] | None = None) -> int:
             if lum is not None:
                 with lock:
                     core.observe_luminance(now, lum)
-            glfw.swap_buffers(window)
+            swap_start = time.monotonic()
+            glfw.swap_buffers(window)  # blocks while the compositor withholds frame callbacks (window hidden or covered)
+            swapped = time.monotonic()
+            core.frame_heartbeat = swapped
+            if swapped - swap_start > SWAP_STALL_LOG_S:
+                log.warning("swap_buffers blocked for %.1f s: the compositor was not showing the output window "
+                            "(hidden, covered by another window, or on an output that was off)", swapped - swap_start)
 
             dt = time.monotonic() - last
             last = time.monotonic()

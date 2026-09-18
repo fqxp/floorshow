@@ -58,6 +58,9 @@ def test_banners():
     b = banners(True, state(flash=dict(enabled=True, limited=True, max_per_s=3.0)))
     assert b[0].kind == "flash_limited" and b[0].action is None and "3 times a second" in b[0].text
     assert banners(True, state(flash=dict(enabled=True, limited=False, max_per_s=3.0))) == []
+    b = banners(True, state(output=dict(presenting=False, stalled_s=4.0)))
+    assert b[0].kind == "output_hidden" and b[0].action is None and "hidden or covered" in b[0].text
+    assert banners(True, state(output=dict(presenting=True, stalled_s=0.0))) == []
     # an internal clock is never "lost"
     assert banners(True, state(clock=clock(source="internal", locked=True))) == []
 

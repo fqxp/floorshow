@@ -50,7 +50,7 @@ def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, flo
 
 @dataclass(frozen=True)
 class Banner:
-    kind: str  # "midi_lost" | "scene_error" | "config_error" | "flash_limited" | "calibrating"
+    kind: str  # "midi_lost" | "scene_error" | "config_error" | "flash_limited" | "output_hidden" | "calibrating"
     title: str
     text: str
     action: str | None  # button label; None = a plain notice
@@ -63,6 +63,11 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
     out: list[Banner] = []
     if state.get("calibrating"):
         out.append(Banner("calibrating", "Calibration in progress", "Calibration in progress", "Show window"))
+    output = state.get("output") or {}
+    if output.get("presenting") is False:
+        out.append(Banner("output_hidden", "Output window",
+                          "The output window is hidden or covered, so the projector is not showing the show. "
+                          "Switch to it (Alt+Tab) to bring it back.", None))
     flash = state.get("flash") or {}
     if flash.get("limited"):
         out.append(Banner("flash_limited", "Flash limiter",

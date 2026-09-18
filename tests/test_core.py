@@ -399,3 +399,14 @@ def test_calibration_preview_carries_crosshair_rows_and_line_visibility(env):
     cmd(c, {"cmd": "calibration.end", "commit": True}, client="ctl")
     committed = c.calibration(None)
     assert (committed.roll_deg, committed.tilt_deg) == (5.0, 20.0)  # roll and tilt are committed with the lines
+
+
+def test_output_state_reports_a_stalled_render_loop(env):
+    c = make(env)
+    assert c.state(100.0)["output"] == {"presenting": True, "stalled_s": 0.0}  # no window (tests, headless): assumed fine
+    c.frame_heartbeat = 100.0
+    assert c.state(100.5)["output"]["presenting"] is True
+    s = c.state(103.2)["output"]  # the render thread has not presented a frame for 3.2 s
+    assert s["presenting"] is False and s["stalled_s"] == 3.2
+    c.frame_heartbeat = 103.2
+    assert c.state(103.3)["output"]["presenting"] is True  # it recovers as soon as frames flow again

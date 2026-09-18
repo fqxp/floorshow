@@ -681,3 +681,17 @@ def test_advanced_calibration_opens_on_the_axis_step(cfgwin):
     cal = w.calibration_window
     assert cal.step_no == 2 and cal.pages.get_visible_child_name() == "2" and cal.footers.get_visible_child_name() == "2"
     assert last_preview(fake)["lines"] is False and last_preview(fake)["crosshair"] is not None
+
+
+def test_keep_on_top_switch_saves_the_x11_setting(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    assert not d.top_sw.get_active()
+    d.top_sw.set_active(True)
+    d._flush()
+    o = load_config(tmp / "config.yaml").output
+    assert (o.x11, o.always_on_top) == (True, True)
+    d.top_sw.set_active(False)
+    d._flush()
+    assert load_config(tmp / "config.yaml").output.x11 is False
