@@ -195,3 +195,26 @@ def test_midi_manager_receives_clock_and_reconnects():
     finally:
         mgr.close()
         out.close_port()
+
+
+def test_output_window_is_not_minimised_when_it_loses_focus():
+    """Regression: GLFW minimises a fullscreen window on focus loss by default, which made the projector image
+    vanish whenever another window was clicked."""
+    from mirrorballs.render.app import configure_output_window
+
+    class FakeGlfw:
+        AUTO_ICONIFY, CURSOR, CURSOR_HIDDEN, FALSE = 0x20006, 0x33001, 0x34002, 0
+
+        def __init__(self):
+            self.calls = []
+
+        def set_window_attrib(self, *a):
+            self.calls.append(("attrib", *a))
+
+        def set_input_mode(self, *a):
+            self.calls.append(("input", *a))
+
+    g = FakeGlfw()
+    configure_output_window(g, "win")
+    assert ("attrib", "win", g.AUTO_ICONIFY, g.FALSE) in g.calls
+    assert ("input", "win", g.CURSOR, g.CURSOR_HIDDEN) in g.calls

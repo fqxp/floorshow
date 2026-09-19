@@ -42,6 +42,17 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def configure_output_window(glfw, window) -> None:
+    """Make the output window an ordinary window that can be fullscreen.
+
+    GLFW minimises a fullscreen window as soon as it loses input focus (GLFW_AUTO_ICONIFY, on by default) so
+    that games can restore the video mode. Here it made the projector image vanish whenever another window
+    was clicked. Wayland does not tell a client it was minimised, so nothing showed in the log except that
+    frames stopped. A window that another program covers or focuses should just stay where it is."""
+    glfw.set_window_attrib(window, glfw.AUTO_ICONIFY, glfw.FALSE)
+    glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
+
+
 def probe_window(glfw, window, fw: int, fh: int) -> dict:
     """Size of the output window in pixels, and whether it covers a whole monitor.
 
@@ -96,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
     glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+    glfw.window_hint(glfw.AUTO_ICONIFY, glfw.FALSE)  # see configure_output_window
     w, h = (int(x) for x in args.size.lower().split("x"))
     window = glfw.create_window(w, h, TITLE, None, None)
     if not window:
@@ -103,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         glfw.terminate()
         ipc.stop()
         return 1
-    glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
+    configure_output_window(glfw, window)
 
     def toggle_fullscreen(win: Any, key: int, _sc: int, action: int, _mods: int) -> None:
         """F11: fullscreen on the second monitor (normally the projector), or back to a window."""
