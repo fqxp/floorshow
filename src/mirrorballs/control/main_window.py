@@ -57,7 +57,7 @@ class BeatTile(Gtk.DrawingArea):
     """68x68 tile that is red on the beat and fades into its ground until the next one. Red is used
     for nothing else in the app."""
 
-    STEPS = 24  # colour levels: the fade lasts ~0.5 s, finer steps would only repaint for no visible gain
+    MAX_FPS = 30  # repaints are costly (the whole window is re-rendered) and 30 per second fades smoothly enough
 
     def __init__(self) -> None:
         super().__init__()
@@ -66,14 +66,19 @@ class BeatTile(Gtk.DrawingArea):
         self.set_valign(Gtk.Align.CENTER)
         self.add_css_class("beat-tile")
         self.intensity = 0.0
+        self._painted_at = 0.0
         self.dark = True
         self.set_draw_func(self._draw)
 
     def set_intensity(self, value: float) -> None:
-        level = round(value * self.STEPS) / self.STEPS
-        if level != self.intensity:
-            self.intensity = level
-            self.queue_draw()
+        if abs(value - self.intensity) < 0.01:
+            return
+        now = time.monotonic()
+        if now - self._painted_at < 1 / self.MAX_FPS:
+            return  # too soon; the next frame tries again
+        self._painted_at = now
+        self.intensity = value
+        self.queue_draw()
 
     def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
         pal = tokens.palette(self.dark)

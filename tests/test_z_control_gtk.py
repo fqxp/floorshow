@@ -334,12 +334,26 @@ def test_beat_tile_and_pips_follow_the_clock(win):
     w._on_tick(None, None)  # the per-frame handler, called directly so the test does not depend on frame timing
     assert w._pip_current == 1  # beat 5 = second beat of the bar
     assert w.beat_tile.intensity > 0.9  # on the beat: red
+    w.beat_tile._painted_at = 0.0  # the tile repaints at most 30 times a second; ignore that here
     w.state_time = time.monotonic() - 0.45  # 0.9 beat later at 120 BPM: nearly faded
     w._on_tick(None, None)
     assert w.beat_tile.intensity < 0.05
     w.state_time = time.monotonic() - 1.6  # 3.2 beats later: wrapped into the next bar (beat 8.2 -> pip 1)
     w._on_tick(None, None)
     assert w._pip_current == 0
+
+
+def test_beat_tile_repaints_at_most_30_times_a_second(win):
+    tile = win[0].beat_tile
+    painted = []
+    tile.queue_draw = lambda: painted.append(1)
+    tile.intensity, tile._painted_at = 0.0, 0.0
+    for i in range(1, 40):  # 39 changes within a few microseconds
+        tile.set_intensity(i / 40)
+    assert len(painted) == 1
+    pump(40)
+    tile.set_intensity(0.0)
+    assert len(painted) == 2
 
 
 def test_client_talks_to_a_live_renderer(app, tmp_path):
