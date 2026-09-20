@@ -48,6 +48,12 @@ clock:
   tempo_offset: 50
 ```
 
+Not every setup sends D (50): check what actually arrives with `aseqdump -l` and `aseqdump -p <port>`, or
+click **Detect** next to the beat note in Configuration > Clock and let the first note fill in note, velocity and
+channel. The output must reach an ALSA port the renderer can read: Mixxx sending to a "Virtual Raw MIDI" port
+does not (that port only carries what other programs write to the raw device), but "Midi Through" does, so pick it
+as Mixxx's output device and as the port here.
+
 The beats set the speed and phase. A beat note does not say which beat starts a bar, so press **Downbeat** (key D,
 or `mirrorballs-ctl sync`) on the first beat of a bar. Test without Mixxx: `uv run python tools/midi_clock.py --bpm 100 --beat-notes`.
 The renderer also holds a GNOME idle inhibitor while it runs, so the screen does not blank mid-show. It is

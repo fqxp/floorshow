@@ -48,6 +48,7 @@ class ConfigDialog(Adw.Window):
         self._guard = False
         self.selected_scene: str | None = None
         self.learn_row: int | None = None
+        self.detecting = False  # waiting for a beat note to be played (Clock tab)
         self.midi_map: list[dict[str, Any]] = []
         self._ports: list[str] = []
         self.cfg = self.store.load()
@@ -126,7 +127,7 @@ class ConfigDialog(Adw.Window):
         if self._save_timer:
             GLib.source_remove(self._save_timer)
         self._flush()
-        if self.learn_row is not None:
+        if self.learn_row is not None or self.detecting:
             self.main.send("midi.learn", on=False)
         self.main.config_dialog = None
         self.main.refresh()
@@ -360,7 +361,12 @@ class ConfigDialog(Adw.Window):
                                     save("midi_channel"))
         self.tempo_note = Stepper(c.tempo_note, -1, 127, 1, lambda v: "<b>off</b>" if v < 0 else note(v), save("tempo_note"))
         self.tempo_offset = Stepper(c.tempo_offset, -127, 300, 1, lambda v: f"<b>{v:+.0f}</b>", save("tempo_offset"))
-        g.add(setting_row("Beat note", "Every note-on with this number is one beat. Mixxx: 50 (D).", self.beat_note))
+        self.detect_btn = push_button("Detect")
+        self.detect_btn.set_tooltip_text("Fills in note, velocity and channel from the next beat that arrives")
+        self.detect_btn.connect("clicked", lambda *_: self._toggle_detect())
+        g.add(setting_row("Detect beat", "Play something in the other program, then click Detect: the first note that "
+                          "arrives on the port above sets the three values below.", self.detect_btn))
+        g.add(setting_row("Beat note", "Every note-on with this number is one beat. Mixxx “MIDI for light”: 50 (D).", self.beat_note))
         g.add(setting_row("Beat velocity", "Only notes with this velocity count. Mixxx: 100.", self.beat_velocity))
         g.add(setting_row("MIDI channel", "Mixxx: the channel set in Midi_for_light.js.", self.midi_channel))
         g.add(setting_row("Tempo note", "The value of this note announces the tempo. It is only displayed; the beats "
@@ -374,6 +380,23 @@ class ConfigDialog(Adw.Window):
         box.set_visible(c.midi_mode == "beats")
         return box
 
+    def _toggle_detect(self) -> None:
+        if not self.main.connected:
+            self.main.toast("The renderer is not running.")
+            return
+        self.detecting = not self.detecting
+        self.detect_btn.get_child().get_last_child().set_text("Listening… (cancel)" if self.detecting else "Detect")
+        self.main.send("midi.learn", on=self.detecting, role="clock")
+
+    def _beat_detected(self, on: dict[str, int]) -> None:
+        self.detecting = False
+        self.detect_btn.get_child().get_last_child().set_text("Detect")
+        self.beat_note.set_value(on["note"])
+        self.beat_velocity.set_value(on.get("velocity", 0))
+        self.midi_channel.set_value(on["ch"])
+        self.save("clock", {"beat_note": on["note"], "beat_velocity": on.get("velocity", 0), "midi_channel": on["ch"]})
+        self.main.toast(f"Beat note {on['note']}, velocity {on.get('velocity', 0)}, channel {on['ch']}")
+
     def _on_midi_mode(self, key: str) -> None:
         self.beat_group.set_visible(key == "beats")
         self.save("clock", {"midi_mode": key})
@@ -383,6 +406,8 @@ class ConfigDialog(Adw.Window):
         ports = list(self._ports)
         if saved and not any(saved.lower() in p.lower() for p in ports):
             ports.insert(0, f"{saved} (not connected)")
+        elif not saved and ports:
+            ports.insert(0, "Select a port…")  # otherwise the first port looks chosen while nothing is saved
         return ports or ["No MIDI input found"]
 
     def _fill_ports(self) -> None:
@@ -565,7 +590,9 @@ class ConfigDialog(Adw.Window):
 
     def on_event(self, ev: dict[str, Any]) -> None:
         """Renderer events: a learned MIDI trigger fills the mapping that is listening."""
-        if ev.get("event") == "midi_learned" and self.learn_row is not None and self.learn_row < len(self.midi_map):
+        if ev.get("event") == "midi_learned" and ev.get("role") == "clock" and self.detecting:
+            self._beat_detected(ev["on"])
+        elif ev.get("event") == "midi_learned" and self.learn_row is not None and self.learn_row < len(self.midi_map):
             self.midi_map[self.learn_row]["on"] = cm.trigger_from_learned(ev["on"])
             self.learn_row = None
             self.learn_bar.set_visible(False)
@@ -764,11 +791,8 @@ class ConfigDialog(Adw.Window):
         clock = state["clock"]
         while (c := self.midi_status.get_first_child()) is not None:
             self.midi_status.remove(c)
-        if clock["source"] == "midi":
-            self.midi_status.append(status_chip(f"Receiving · {clock['bpm']:.1f} BPM", "ok") if clock["locked"]
-                                    else status_chip("Waiting for clock", "warn"))
-        else:
-            self.midi_status.append(status_chip("Not used (internal clock)", ""))
+        text, kind = vm.midi_input_status(state)
+        self.midi_status.append(status_chip(text, kind))
         tp = state.get("test_pattern", False)
         self.test_btn.get_child().get_last_child().set_text("Hide test pattern" if tp else "Show test pattern")
         w = state.get("window")

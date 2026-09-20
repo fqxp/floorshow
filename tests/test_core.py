@@ -348,11 +348,11 @@ def test_midi_learn_reports_the_next_control_message_without_acting_on_it(env):
     assert cmd(c, {"cmd": "midi.learn", "on": True})["ok"] and c.state(100.0)["learning"]
     c.on_midi({"control"}, bytes([0x90, 36, 100]), 100.0)  # would switch to b, but is learned instead
     assert c.current == "a" and not c.learn
-    assert c.take_outbox() == [{"event": "midi_learned", "on": {"note": 36, "ch": 1}}]
+    assert c.take_outbox() == [{"event": "midi_learned", "role": "control", "on": {"note": 36, "ch": 1}}]
     assert c.take_outbox() == []
     cmd(c, {"cmd": "midi.learn", "on": True})
     c.on_midi({"control"}, bytes([0xB2, 7, 64]), 100.0)
-    assert c.take_outbox() == [{"event": "midi_learned", "on": {"cc": 7, "ch": 3}}]
+    assert c.take_outbox() == [{"event": "midi_learned", "role": "control", "on": {"cc": 7, "ch": 3}}]
     cmd(c, {"cmd": "midi.learn", "on": True})
     c.on_midi({"control"}, bytes([0xC0, 5]), 100.0)
     assert c.take_outbox()[0]["on"] == {"program": 5, "ch": 1}
@@ -470,3 +470,24 @@ def test_switching_between_clock_and_beat_notes_reconfigures_the_clock(env):
     env[1].write_text(MIXXX)
     c.poll_files(200.0)
     assert c.clock.midi_beats
+
+
+def test_detect_reports_the_first_note_on_the_clock_port_and_uses_it_for_nothing_else(env):
+    c = make(env, MIXXX)
+    assert cmd(c, {"cmd": "midi.learn", "on": True, "role": "clock"})["ok"]
+    clk = {"clock"}
+    c.on_midi(clk, bytes([0x80, 60, 0]), 100.0)  # a note-off is not a beat
+    c.on_midi(clk, bytes([0xF8]), 100.0)
+    assert c.take_outbox() == []
+    c.on_midi(clk, bytes([0x90, 60, 100]), 100.0)  # channel 1, note 60
+    assert c.take_outbox() == [{"event": "midi_learned", "role": "clock", "on": {"note": 60, "ch": 1, "velocity": 100}}]
+    assert not c.clock._beat_times and not c.learn  # reported, not counted; learning ends after one note
+    c.on_midi(clk, bytes([0x90, 50, 100]), 100.5)
+    assert len(c.clock._beat_times) == 1  # back to normal
+
+
+def test_a_control_learn_ignores_the_clock_port(env):
+    c = make(env, MIXXX + "midi: {control_port: pad}\n".replace("midi:", "midi:"))
+    cmd(c, {"cmd": "midi.learn", "on": True})  # role defaults to control
+    c.on_midi({"clock"}, bytes([0x90, 50, 100]), 100.0)
+    assert c.take_outbox() == [] and c.learn

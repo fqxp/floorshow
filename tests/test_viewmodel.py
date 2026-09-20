@@ -127,3 +127,19 @@ def test_outdated_renderer_banner():
     assert [b.kind for b in vm.banners(True, old)] == ["renderer_outdated"]
     assert vm.banners(True, dict(clock=clock, rev=vm.REV)) == []
     assert vm.banners(True, dict(clock=clock, rev=vm.REV + 1)) == []
+
+
+def test_midi_input_status_says_what_is_wrong():
+    def mk(mode="clock", locked=True, wanted="mixxx", open_="Mixxx 20:0", source="midi"):
+        return dict(clock=clock(source=source, locked=locked, midi_mode=mode), midi={"clock": {"wanted": wanted, "open": open_}})
+
+    assert vm.midi_input_status(mk(source="internal")) == ("Not used (internal clock)", "")
+    assert vm.midi_input_status(mk(wanted=None, open_=None)) == ("No port selected", "warn")
+    assert vm.midi_input_status(mk(open_=None)) == ("Port not found", "warn")
+    assert vm.midi_input_status(mk(mode="beats", locked=False)) == ("Waiting for beat notes", "warn")
+    assert vm.midi_input_status(mk(locked=False)) == ("Waiting for clock", "warn")
+    assert vm.midi_input_status(mk()) == ("Receiving · 124.0 BPM", "ok")
+    assert vm.midi_input_status(dict(clock=clock(), midi={}))[1] == "ok"  # nothing reported: no port complaint
+    text, warn = vm.clock_text(clock(locked=False, midi_mode="beats"), midi={"clock": {"wanted": "x", "open": "x"}})
+    assert warn and text.startswith("MIDI · waiting for beat notes")
+    assert vm.clock_text(clock(), midi={"clock": {"wanted": None, "open": None}}) == ("MIDI · no port selected", True)

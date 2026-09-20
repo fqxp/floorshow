@@ -453,6 +453,37 @@ def test_downbeat_button_and_key_send_the_sync(win):
     assert fake.sent[-1] == ("sync_downbeat", {})
 
 
+def test_detect_fills_in_the_beat_note_from_the_first_note(cfgwin):
+    w, fake, tmp = cfgwin
+    w.set_connection(True)
+    w.apply_state(st())
+    w.open_config()
+    d = w.config_dialog
+    d._toggle_detect()
+    assert fake.sent[-1] == ("midi.learn", {"on": True, "role": "clock"}) and d.detecting
+    d.on_event({"event": "midi_learned", "role": "control", "on": {"note": 1, "ch": 1}})  # not for us
+    assert d.detecting
+    d.on_event({"event": "midi_learned", "role": "clock", "on": {"note": 60, "ch": 1, "velocity": 100}})
+    d._flush()
+    c = load_config(tmp / "config.yaml").clock
+    assert (c.beat_note, c.beat_velocity, c.midi_channel) == (60, 100, 1) and not d.detecting
+    assert (d.beat_note.value, d.midi_channel.value) == (60, 1)
+
+
+def test_the_port_list_starts_on_a_placeholder_while_no_port_is_saved(cfgwin):
+    w, _, _ = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    d._ports = ["Midi Through 14:0", "Mixxx 130:0"]
+    d._fill_ports()
+    assert d.port_dd.get_model().get_string(0) == "Select a port…" and d.port_dd.get_selected() == 0
+    d._on_port(0)  # the placeholder is not a port
+    assert load_config(w.store.path).clock.midi_port is None
+    d._on_port(2)
+    d._flush()
+    assert load_config(w.store.path).clock.midi_port == "Mixxx 130:0"
+
+
 def test_output_tab_shows_window_state_and_toggles_the_test_pattern(cfgwin):
     w, fake, _ = cfgwin
     w.open_config()

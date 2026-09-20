@@ -102,6 +102,7 @@ class TestPatternSet(_Cmd):
 class MidiLearn(_Cmd):
     cmd: Literal["midi.learn"]
     on: bool  # the next note / CC / program change on the control port is reported as a "midi_learned" event
+    role: Literal["control", "clock"] = "control"  # "clock": the next note on the clock port (beat-notes mode)
 
 
 class Simple(_Cmd):

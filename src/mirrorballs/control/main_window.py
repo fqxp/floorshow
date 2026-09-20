@@ -790,7 +790,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _refresh_clock(self, st: dict[str, Any] | None) -> None:
         text, warn = vm.clock_text(st["clock"] if st else None, self.cfg.clock.source, self.cfg.clock.midi_port,
-                                   self.cfg.clock.bpm)
+                                   self.cfg.clock.bpm,
+                                   st.get("midi") if st else None)
         self.source_chip.set_text(text)
         internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
         self.source_chip.set_tooltip_text("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock")

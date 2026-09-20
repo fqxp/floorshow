@@ -63,6 +63,7 @@ class Core:
         self.frame_heartbeat: float | None = None  # set by the render thread after every presented frame
         self.test_pattern = False
         self.learn = False  # MIDI learn: report the next control message instead of acting on it
+        self.learn_role = "control"  # which port the learn waits on: "control" or "clock"
         self.outbox: list[dict[str, Any]] = []  # events for all clients, drained by the control loop
 
         self.config = Config()
@@ -330,7 +331,7 @@ class Core:
         elif isinstance(cmd, P.TestPatternSet):
             self.test_pattern = cmd.on
         elif isinstance(cmd, P.MidiLearn):
-            self.learn = cmd.on
+            self.learn, self.learn_role = cmd.on, cmd.role
         elif isinstance(cmd, P.CalibrationBegin):
             self._begin_calibration(client)
         elif isinstance(cmd, P.CalibrationPreview):
@@ -434,6 +435,11 @@ class Core:
         c = self.config.clock
         if status & 0xF0 != 0x90 or len(data) < 3 or data[2] == 0:  # note-on with a velocity only
             return False
+        if self.learn and self.learn_role == "clock":  # "detect": report the first note instead of using it
+            self.outbox.append({"event": "midi_learned", "role": "clock",
+                                "on": {"note": data[1], "ch": (status & 0x0F) + 1, "velocity": data[2]}})
+            self.learn = False
+            return True
         if c.midi_channel and (status & 0x0F) + 1 != c.midi_channel:
             return False
         if data[1] == c.beat_note and (not c.beat_velocity or data[2] == c.beat_velocity):
@@ -450,9 +456,9 @@ class Core:
         d2 = data[2] if len(data) > 2 else 0
         if kind == 0x90 and d2 == 0:  # note-on with velocity 0 is a note-off
             return
-        if self.learn and kind in (0x90, 0xB0, 0xC0):
+        if self.learn and self.learn_role == "control" and kind in (0x90, 0xB0, 0xC0):
             key = {0x90: "note", 0xB0: "cc", 0xC0: "program"}[kind]
-            self.outbox.append({"event": "midi_learned", "on": {key: d1, "ch": ch}})
+            self.outbox.append({"event": "midi_learned", "role": "control", "on": {key: d1, "ch": ch}})
             self.learn = False
             return
         for m in self.config.midi.map:
@@ -601,6 +607,7 @@ class Core:
                 "beats_per_bar": snap.beats_per_bar,
                 "locked": snap.locked,
                 "status": snap.status,
+                "midi_mode": cfg.clock.midi_mode,
             },
             "scene": self.current,
             "scenes": self.scene_ids(),

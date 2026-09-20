@@ -40,8 +40,24 @@ def renderer_chip(connected: bool, starting: bool, state: dict[str, Any] | None)
     return Chip(f"Renderer: running · {state.get('fps', 0):.0f} fps", "ok")
 
 
+def midi_input_status(state: dict[str, Any]) -> tuple[str, str]:
+    """(text, kind) for the MIDI clock input: what is wrong, or that it works. kind: "ok" | "warn" | "" (not used)."""
+    clock = state["clock"]
+    if clock["source"] != "midi":
+        return "Not used (internal clock)", ""
+    midi = state.get("midi")
+    port = (midi or {}).get("clock") or {}
+    if midi and not port.get("wanted"):  # an empty "midi" means the renderer did not say
+        return "No port selected", "warn"
+    if midi and not port.get("open"):
+        return "Port not found", "warn"
+    if not clock["locked"]:
+        return f"Waiting for {'beat notes' if clock.get('midi_mode') == 'beats' else 'clock'}", "warn"
+    return f"Receiving · {clock['bpm']:.1f} BPM", "ok"
+
+
 def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_port: str | None = None,
-               cfg_bpm: float = 120.0) -> tuple[str, bool]:
+               cfg_bpm: float = 120.0, midi: dict[str, Any] | None = None) -> tuple[str, bool]:
     """(source chip text, is_warning). Uses the live clock when connected, else the saved config."""
     if clock is None:
         if cfg_source == "midi":
@@ -50,8 +66,14 @@ def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_p
     if clock["source"] == "internal":
         return f"Internal · {clock['bpm']:.0f} BPM", False
     port = clock.get("port") or "MIDI"
+    wired = (midi or {}).get("clock") or {}
+    if midi and not wired.get("wanted"):
+        return "MIDI · no port selected", True
+    if midi and not wired.get("open"):
+        return f"MIDI · {port} not found", True
     if not clock["locked"]:
-        return f"MIDI · waiting for clock (holding {clock['bpm']:.0f} BPM)", True
+        what = "beat notes" if clock.get("midi_mode") == "beats" else "clock"
+        return f"MIDI · waiting for {what} (holding {clock['bpm']:.0f} BPM)", True
     return f"MIDI · {port} · {clock['bpm']:.1f} BPM", False
 
 
