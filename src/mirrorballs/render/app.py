@@ -24,6 +24,8 @@ from .watchdog import StallWatchdog, file_dumper, install_signal_dump
 
 log = logging.getLogger("mirrorballs.render")
 STATE_HZ = 30.0
+MAX_FPS = 30.0  # the output is drawn at most this often; scenes are functions of the clock, so a lower rate only costs smoothness
+FRAME_LEAD_S = 0.002  # start this long before a frame is due, so rendering is done on time
 CONTROL_TICK_S = 0.02  # 50 Hz: MIDI clock ticks are timestamped in the MIDI callback, so this only bounds trigger latency
 SWAP_STALL_LOG_S = 0.5
 TITLE = "Mirrorballs Output"
@@ -190,13 +192,19 @@ def main(argv: list[str] | None = None) -> int:
     def render_loop() -> None:
         try:
             glfw.make_context_current(window)
-            glfw.swap_interval(1)  # vsync: one frame per display refresh is the render tick
+            glfw.swap_interval(1)  # vsync: swap_buffers returns right after a display refresh, which paces the loop
             ctx = moderngl.create_context()
             pipe = GlPipeline(ctx)
             log.info("GL: %s | %s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"])
             log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
             last, failed_msg = time.monotonic(), ""
+            due = last
             while not stop.is_set():
+                # Wayland ignores swap intervals above 1, so the cap is a fixed schedule: one frame every
+                # 1/MAX_FPS, started shortly before it is due. A schedule rather than "sleep after each swap"
+                # keeps the period exact, so frames stay in step with every second display refresh.
+                if (wait := due - FRAME_LEAD_S - time.monotonic()) > 0:
+                    time.sleep(wait)
                 now = time.monotonic()
                 fw, fh = fb["size"]
                 if fw <= 0 or fh <= 0:  # minimised
@@ -218,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
                 core.frame_heartbeat = swapped
                 if swapped - swap_start > SWAP_STALL_LOG_S:
                     log.warning("swap_buffers blocked for %.1f s: the compositor was not asking for frames", swapped - swap_start)
+                due = max(due + 1.0 / MAX_FPS, swapped - 1.0 / MAX_FPS)  # after a stall, do not try to catch up
                 dt = swapped - last
                 last = swapped
                 if dt > 0:
