@@ -101,7 +101,7 @@ def test_tokens_and_css():
 def test_key_to_action_matches_the_shortcut_sheet():
     from mirrorballs.control.viewmodel import key_to_action as k
 
-    assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("B") == ("blackout", None)
+    assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("B") == ("blackout", None)
     assert k("m") == ("mode", "manual") and k("r") == ("mode", "random")
     assert k("bracketleft") == ("step", -1) and k("bracketright") == ("step", 1)
     assert k("3") == ("scene-key", "3") and k("9") is None and k("0") is None

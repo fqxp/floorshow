@@ -424,6 +424,35 @@ def test_clock_and_timing_settings_are_saved_and_the_renderer_reloads(cfgwin):
     assert load_config(tmp / "config.yaml").clock.bpm == 128.0 and d.bpm_entry.has_css_class("error")
 
 
+def test_beat_note_settings_default_to_mixxx_and_are_saved(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_config()
+    d = w.config_dialog
+    assert not d.beat_group.get_visible()  # only in beat-notes mode
+    assert (d.beat_note.value, d.beat_velocity.value, d.midi_channel.value, d.tempo_note.value, d.tempo_offset.value) == (50, 100, 0, 52, 50)
+    d.midi_mode_seg.select("beats")
+    d._on_midi_mode("beats")
+    assert d.beat_group.get_visible()
+    d.beat_note.set_value(60, notify=True)
+    d.beat_velocity.set_value(0, notify=True)
+    d.midi_channel.set_value(3, notify=True)
+    d.tempo_note.set_value(-1, notify=True)
+    d._flush()
+    c = load_config(tmp / "config.yaml").clock
+    assert (c.midi_mode, c.beat_note, c.beat_velocity, c.midi_channel, c.tempo_note) == ("beats", 60, 0, 3, -1)
+    assert ("reload", {}) in fake.sent
+
+
+def test_downbeat_button_and_key_send_the_sync(win):
+    w, fake = win
+    assert not w.downbeat_btn.get_sensitive()
+    w.set_connection(True)
+    w.apply_state(st())
+    assert w.downbeat_btn.get_sensitive()
+    w.run_action("downbeat")
+    assert fake.sent[-1] == ("sync_downbeat", {})
+
+
 def test_output_tab_shows_window_state_and_toggles_the_test_pattern(cfgwin):
     w, fake, _ = cfgwin
     w.open_config()

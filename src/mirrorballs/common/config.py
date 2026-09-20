@@ -28,6 +28,14 @@ class _Base(BaseModel):
 class ClockConfig(_Base):
     source: Literal["midi", "internal"] = "internal"
     midi_port: str | None = None  # substring match; ALSA client numbers change between runs
+    # How the MIDI source announces the beat. "clock": standard MIDI clock (24 per beat, Start/Stop).
+    # "beats": one note per beat, as Mixxx's "MIDI for light" script sends. The defaults below are that script's.
+    midi_mode: Literal["clock", "beats"] = "clock"
+    beat_note: int = Field(50, ge=0, le=127)  # D
+    beat_velocity: int = Field(100, ge=0, le=127)  # only this velocity is a beat; 0 = any
+    midi_channel: int = Field(0, ge=0, le=16)  # 0 = any
+    tempo_note: int = Field(52, ge=-1, le=127)  # E: its value announces the tempo (display only); -1 = none
+    tempo_offset: int = Field(50, ge=-127, le=300)  # tempo = value + offset
     bpm: float = Field(120.0, ge=20, le=300)
     beats_per_bar: int = Field(4, ge=1, le=16)
     offset_ms: float = Field(0.0, ge=-500, le=500)

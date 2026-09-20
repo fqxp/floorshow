@@ -151,3 +151,79 @@ def test_ticks_ignored_on_internal_source():
     c = Clock(bpm=120, now=0.0)
     c.on_midi_tick(0.1)
     assert c.snapshot(1.0).beat == pytest.approx(2.0)
+
+
+def feed_beats(clock, bpm, count, t0=0.0, jitter=0.0, seed=1):
+    """Send one beat note per beat at ``bpm``; returns the ideal beat times."""
+    rng = random.Random(seed)
+    period = 60.0 / bpm
+    times = [t0 + k * period for k in range(count)]
+    for t in times:
+        clock.on_midi_beat(t + rng.gauss(0, jitter))
+    return times
+
+
+def beat_clock():
+    c = Clock(bpm=120, now=0.0)
+    c.use_midi(0.0, beats=True)
+    return c
+
+
+def test_beat_notes_lock_to_the_tempo_and_phase():
+    c = beat_clock()
+    times = feed_beats(c, 96, 16, t0=5.0, jitter=0.004)
+    s = c.snapshot(times[-1] + 0.25)
+    assert s.locked and s.status == "locked"
+    assert c._bpm == pytest.approx(96, rel=0.01)
+    assert s.phase == pytest.approx(0.25 * 96 / 60, abs=0.03)  # a quarter second after a beat
+
+
+def test_beat_notes_first_note_lands_on_a_whole_beat():
+    c = beat_clock()
+    c.on_midi_beat(3.0)
+    assert c.snapshot(3.0).phase == pytest.approx(0.0, abs=1e-9)
+
+
+def test_beat_notes_adapt_to_a_tempo_change():
+    c = beat_clock()
+    feed_beats(c, 100, 12, t0=0.0)
+    t0 = 12 * 0.6
+    feed_beats(c, 140, 20, t0=t0)
+    assert c._bpm == pytest.approx(140, rel=0.02)
+
+
+def test_beat_notes_gap_then_recovery_and_lock_flag():
+    c = beat_clock()
+    times = feed_beats(c, 120, 8)
+    assert c.snapshot(times[-1] + 0.4).locked
+    assert not c.snapshot(times[-1] + 3.0).locked  # no note for 6 beats
+    c.on_midi_beat(times[-1] + 3.0)
+    assert c.snapshot(times[-1] + 3.0).locked
+
+
+def test_beat_notes_keep_the_downbeat_set_by_hand():
+    c = beat_clock()
+    times = feed_beats(c, 120, 10)
+    ts = times[-1] + 0.1
+    c.sync_downbeat(ts)  # "now is the first beat of a bar"
+    assert c.snapshot(ts).beat % 4 == pytest.approx(0.0, abs=1e-6)
+    later = feed_beats(c, 120, 9, t0=ts + 0.5)  # the notes go on; each is the next beat after the sync point
+    beat = c.snapshot(later[-1]).beat
+    assert beat % 4 == pytest.approx(1.0, abs=0.1)  # 9 beats after a downbeat = beat 2 of the bar (0-based 1)
+
+
+def test_announced_tempo_is_shown_but_does_not_drive_the_clock():
+    c = beat_clock()
+    feed_beats(c, 120, 12)
+    c.set_reported_bpm(118)
+    s = c.snapshot(8.0)
+    assert s.bpm == 118 and c._bpm == pytest.approx(120, rel=0.01)
+
+
+def test_beat_notes_are_ignored_in_clock_mode_and_on_the_internal_source():
+    c = Clock(bpm=120, now=0.0)
+    c.on_midi_beat(1.0)  # internal
+    assert c.snapshot(1.0).beat == pytest.approx(2.0)
+    c.use_midi(1.0)  # clock mode
+    c.on_midi_beat(2.0)
+    assert c._next_beat is None

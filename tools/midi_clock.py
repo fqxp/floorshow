@@ -2,6 +2,7 @@
 
     uv run python tools/midi_clock.py --bpm 128            # runs until Ctrl-C
     uv run python tools/midi_clock.py --bpm 128 --measure 10   # also receives its own clock, prints jitter
+    uv run python tools/midi_clock.py --bpm 128 --beat-notes   # one note per beat, like Mixxx's "MIDI for light"
 
 Creates an ALSA sequencer output port named "mirrorballs test clock", sends Start, then 24 ticks
 per beat. Pick that port as the clock source in the app.
@@ -17,10 +18,28 @@ PORT_NAME = "mirrorballs test clock"
 CLOCK, START, STOP = 0xF8, 0xFA, 0xFC
 
 
+def beat_notes(out: rtmidi.MidiOut, bpm: float) -> None:
+    period = 60.0 / bpm
+    tempo = min(127, max(0, round(bpm) - 50))
+    print(f"sending a beat note every {period * 1000:.1f} ms ({bpm} BPM) on '{PORT_NAME}', Ctrl-C to stop")
+    start, k = time.monotonic(), 0
+    try:
+        while True:
+            while (dt := start + k * period - time.monotonic()) > 0:
+                time.sleep(dt - 0.0005 if dt > 0.001 else 0)
+            out.send_message([0x90, 50, 100])
+            out.send_message([0x90, 52, tempo])
+            k += 1
+    except KeyboardInterrupt:
+        pass
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bpm", type=float, default=120.0)
     ap.add_argument("--measure", type=float, metavar="SECONDS", help="receive our own clock and report jitter")
+    ap.add_argument("--beat-notes", action="store_true",
+                    help="send note D (50, velocity 100) on every beat and the tempo on note E (52, value BPM - 50)")
     args = ap.parse_args()
 
     out = rtmidi.MidiOut()
@@ -36,6 +55,9 @@ def main() -> None:
         idx = next(i for i, p in enumerate(ports) if PORT_NAME in p)
         inp.open_port(idx)
 
+    if args.beat_notes:
+        beat_notes(out, args.bpm)
+        return
     period = 60.0 / (args.bpm * 24)
     print(f"sending {args.bpm} BPM on '{PORT_NAME}' (period {period * 1000:.3f} ms), Ctrl-C to stop")
     out.send_message([START])

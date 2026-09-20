@@ -322,7 +322,11 @@ class ConfigDialog(Adw.Window):
         g = SettingsGroup("MIDI clock input")
         g.add(setting_row("Input port", "Ports that are present right now are listed.", self.port_dd, refresh))
         g.add(setting_row("Status", None, self.midi_status))
-        self.clock_stack.add_named(g, "midi")
+        self.midi_mode_seg = Segmented([("clock", "MIDI clock"), ("beats", "Beat notes")], c.midi_mode, self._on_midi_mode)
+        g.add(setting_row("Beat signal", "MIDI clock is 24 pulses per beat. Some programs, such as Mixxx with the “MIDI for light” "
+                          "script, send a note on every beat instead.", self.midi_mode_seg))
+        self.beat_group = self._beat_notes_group()
+        self.clock_stack.add_named(vbox(16, g, self.beat_group), "midi")
         # internal
         entry = Gtk.Entry(text=f"{c.bpm:g}", width_chars=6, xalign=1.0, input_purpose=Gtk.InputPurpose.NUMBER)
         entry.add_css_class("mb-entry")
@@ -342,6 +346,37 @@ class ConfigDialog(Adw.Window):
         t.add(setting_row("Beats per bar", "Sets the downbeat and the “every N bars” counter.", self.bpb))
         t.add(setting_row("Beat offset", "Shift the beat to cancel projector latency. Positive means later.", self.offset))
         page.append(t)
+
+    def _beat_notes_group(self) -> Gtk.Widget:
+        c = self.cfg.clock
+        names = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"]
+        note = lambda v: f"<b>{v:.0f}</b> ({names[int(v) % 12]})"
+        save = lambda key: (lambda v: self.save("clock", {key: int(v)}))
+        g = SettingsGroup("Beat notes")
+        self.beat_note = Stepper(c.beat_note, 0, 127, 1, note, save("beat_note"))
+        self.beat_velocity = Stepper(c.beat_velocity, 0, 127, 1, lambda v: "<b>any</b>" if v == 0 else f"<b>{v:.0f}</b>",
+                                     save("beat_velocity"))
+        self.midi_channel = Stepper(c.midi_channel, 0, 16, 1, lambda v: "<b>any</b>" if v == 0 else f"<b>{v:.0f}</b>",
+                                    save("midi_channel"))
+        self.tempo_note = Stepper(c.tempo_note, -1, 127, 1, lambda v: "<b>off</b>" if v < 0 else note(v), save("tempo_note"))
+        self.tempo_offset = Stepper(c.tempo_offset, -127, 300, 1, lambda v: f"<b>{v:+.0f}</b>", save("tempo_offset"))
+        g.add(setting_row("Beat note", "Every note-on with this number is one beat. Mixxx: 50 (D).", self.beat_note))
+        g.add(setting_row("Beat velocity", "Only notes with this velocity count. Mixxx: 100.", self.beat_velocity))
+        g.add(setting_row("MIDI channel", "Mixxx: the channel set in Midi_for_light.js.", self.midi_channel))
+        g.add(setting_row("Tempo note", "The value of this note announces the tempo. It is only displayed; the beats "
+                          "themselves set the speed. Mixxx: 52 (E).", self.tempo_note))
+        g.add(setting_row("Tempo offset", "Tempo = note value + offset. Mixxx: +50.", self.tempo_offset))
+        note_box = hbox(12, icon("dialog-information-symbolic", 18), label(
+            "A beat note does not say which beat starts the bar. Press the downbeat button (D) on the first beat of a bar to set it.",
+            "secondary", wrap=True, hexpand=True))
+        note_box.add_css_class("note-box")
+        box = vbox(16, g, note_box)
+        box.set_visible(c.midi_mode == "beats")
+        return box
+
+    def _on_midi_mode(self, key: str) -> None:
+        self.beat_group.set_visible(key == "beats")
+        self.save("clock", {"midi_mode": key})
 
     def _ports_for_dropdown(self) -> list[str]:
         saved = self.cfg.clock.midi_port

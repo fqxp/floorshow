@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 2
+REV = 3
 
 
 class _Cmd(BaseModel):

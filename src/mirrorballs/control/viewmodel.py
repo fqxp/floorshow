@@ -145,6 +145,8 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
         return ("toggle-run", None)
     if name in ("t", "T"):
         return ("tap", None)
+    if name in ("d", "D"):
+        return ("downbeat", None)
     if name in ("b", "B"):
         return ("blackout", None)
     if name in ("m", "M"):

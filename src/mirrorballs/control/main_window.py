@@ -259,6 +259,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.pips_box = hbox(8, *self._pips, margin_start=3)
         self.tap_btn = push_button("Tap tempo", kbd_text="T")
         self.tap_btn.connect("clicked", lambda *_: self.act_tap())
+        self.downbeat_btn = push_button("Downbeat")
+        self.downbeat_btn.set_tooltip_text("The current moment is the first beat of a bar (D)")
+        self.downbeat_btn.connect("clicked", lambda *_: self.act_downbeat())
         scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         scroll.connect("scroll", self._on_bpm_scroll)
         self.source_chip.add_controller(scroll)
@@ -269,7 +272,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.indicator_row = hbox(8, label("Indicator", "secondary"), self.indicator_sw)
         self._apply_indicator()
         strip_right = vbox(10, hbox(12, self.source_chip, Gtk.Box(hexpand=True), self.indicator_row),
-                           hbox(12, self.pips_box, Gtk.Box(hexpand=True), self.tap_btn), hexpand=True, valign=Gtk.Align.CENTER)
+                           hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn), hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, self.beat_tile, strip_right, hexpand=True)
         self.clock_panel.add_css_class("panel")
         self.clock_panel.set_margin_top(0)
@@ -425,6 +428,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.act_toggle_run()
         elif action == "tap":
             self.act_tap()
+        elif action == "downbeat":
+            self.act_downbeat()
         elif action == "blackout":
             self.blackout_btn.set_active(not self.blackout_btn.get_active())
         elif action == "mode":
@@ -526,6 +531,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_clock(self.state)
         self._schedule_persist_tempo()
         return True
+
+    def act_downbeat(self) -> None:
+        self.send("sync_downbeat")
 
     def act_tap(self) -> None:
         self.send("tap")
@@ -757,6 +765,7 @@ class MainWindow(Adw.ApplicationWindow):
             set_classes(self.clock_panel, {"disabled-area": offline})
             self.clock_panel.set_sensitive(not self.calibrating)
             self.tap_btn.set_sensitive(self.connected and not self.calibrating)
+            self.downbeat_btn.set_sensitive(self.connected and not self.calibrating)
             self.lookup_action("quit-renderer").set_enabled(self.connected)
             self.run_btn.set_sensitive(not self.calibrating)
         finally:
@@ -999,7 +1008,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def show_shortcuts(self) -> None:
         rows = [
-            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Blackout", ["B"]),
+            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]), ("Blackout", ["B"]),
                              ("Scene 1–8", ["1", "…", "8"]), ("Previous / next scene", ["[", "]"]),
                              ("Manual / Random", ["M", "R"]), ("Brightness", ["Ctrl", "↑↓"]),
                              ("Configuration", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"])]),

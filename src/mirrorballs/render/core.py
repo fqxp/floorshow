@@ -165,9 +165,10 @@ class Core:
         prev = self._applied_clock
         self.clock.set_beats_per_bar(c.beats_per_bar)
         self.clock.set_offset_ms(c.offset_ms)
-        if prev is None or prev.source != c.source or (c.source == "internal" and prev.bpm != c.bpm):
+        if (prev is None or prev.source != c.source or (c.source == "internal" and prev.bpm != c.bpm)
+                or (c.source == "midi" and prev.midi_mode != c.midi_mode)):
             if c.source == "midi":
-                self.clock.use_midi(now)
+                self.clock.use_midi(now, beats=c.midi_mode == "beats")
             else:
                 self.clock.use_internal(c.bpm, now)
         self._applied_clock = c
@@ -405,7 +406,11 @@ class Core:
         if not data:
             return
         status = data[0]
-        if "clock" in roles and self.config.clock.source == "midi":
+        c = self.config.clock
+        if "clock" in roles and c.source == "midi" and c.midi_mode == "beats":
+            if self._midi_beat_note(status, data, t):
+                return
+        elif "clock" in roles and c.source == "midi":
             if status == 0xF8:
                 self.clock.on_midi_tick(t)
                 return
@@ -423,6 +428,21 @@ class Core:
                 return
         if "control" in roles and 0x80 <= status < 0xF0:
             self._midi_control(status, data, t)
+
+    def _midi_beat_note(self, status: int, data: bytes, t: float) -> bool:
+        """Beat-notes mode: is this message the beat (or the announced tempo)? Returns True if it was used."""
+        c = self.config.clock
+        if status & 0xF0 != 0x90 or len(data) < 3 or data[2] == 0:  # note-on with a velocity only
+            return False
+        if c.midi_channel and (status & 0x0F) + 1 != c.midi_channel:
+            return False
+        if data[1] == c.beat_note and (not c.beat_velocity or data[2] == c.beat_velocity):
+            self.clock.on_midi_beat(t)
+            return True
+        if c.tempo_note >= 0 and data[1] == c.tempo_note:
+            self.clock.set_reported_bpm(data[2] + c.tempo_offset)
+            return True
+        return False
 
     def _midi_control(self, status: int, data: bytes, now: float) -> None:
         kind, ch = status & 0xF0, (status & 0x0F) + 1

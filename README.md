@@ -30,6 +30,26 @@ gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "['<Super>F11']
 Config lives in `~/.config/mirrorballs/config.yaml`, scenes in `~/.config/mirrorballs/scenes/*.yaml`
 (bundled examples in `scenes/`). Both are hot-reloaded. Fake a MIDI clock with
 `uv run python tools/midi_clock.py --bpm 128`, then set `clock: {source: midi, midi_port: "mirrorballs test clock"}`.
+
+**Beat notes instead of MIDI clock.** Mixxx sends no MIDI clock. Its
+[MIDI for light](https://github.com/mixxxdj/mixxx/wiki/MIDI%20clock%20output) script sends a note on every beat
+instead (D, velocity 100) and the tempo as a second note (E, value = BPM - 50). Use that with
+(Configuration > Clock > Beat signal > Beat notes):
+
+```yaml
+clock:
+  source: midi
+  midi_port: mixxx            # substring of the port name
+  midi_mode: beats            # "clock" (default) = standard 24-per-beat MIDI clock
+  beat_note: 50               # D; a note-on with this number is one beat
+  beat_velocity: 100          # 0 = any velocity
+  midi_channel: 0             # 0 = any channel
+  tempo_note: 52              # E; its value + tempo_offset is the announced tempo (shown only); -1 = off
+  tempo_offset: 50
+```
+
+The beats set the speed and phase. A beat note does not say which beat starts a bar, so press **Downbeat** (key D,
+or `mirrorballs-ctl sync`) on the first beat of a bar. Test without Mixxx: `uv run python tools/midi_clock.py --bpm 100 --beat-notes`.
 The renderer also holds a GNOME idle inhibitor while it runs, so the screen does not blank mid-show. It is
 released when the renderer exits, even if it is killed.
 

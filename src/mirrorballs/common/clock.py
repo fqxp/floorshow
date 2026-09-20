@@ -7,6 +7,10 @@ Model: ``beat(now) = anchor_beat + (now - anchor_time) * bpm / 60`` for both sou
 (24 per beat) do not set the beat directly; they nudge the anchor (a first-order phase-locked loop)
 and their tick spacing over the last two beats sets the tempo, so ticks that arrive with a few ms of jitter never make
 the phase jump. A large error (Start, Song Position Pointer, a dropout) hard-resyncs instead.
+
+Some programs (Mixxx's "MIDI for light" script) send no MIDI clock but one note per beat. "Beat notes" mode feeds
+those into the same kind of loop: every note is the next whole beat. The bar position is not part of such a
+stream, so the downbeat is set by hand (``sync_downbeat``); an announced tempo is only used for display.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ PPQN = 24
 MIN_BPM, MAX_BPM = 20.0, 300.0
 SLEW_GAIN = 0.15  # fraction of the phase error removed per tick
 HARD_RESYNC_BEATS = 0.25
+BEAT_SLEW_GAIN = 0.3  # beat notes are 24 times rarer than clock ticks, so each one corrects more
+BEAT_WINDOW = 9  # beat notes the tempo is measured over (8 intervals)
 LOSS_TIMEOUT_S = 0.5  # no tick for this long (or 4 tick periods, if slower) means the clock is lost
 TAP_RESET_S = 2.0
 MAX_TAPS = 8
@@ -54,6 +60,11 @@ class Clock:
         self._next_tick = 0  # index of the next tick; beat position of tick k is k / PPQN
         self._hard_next = False
         self._running = True
+        # MIDI beat notes
+        self.midi_beats = False
+        self._beat_times: deque[float] = deque(maxlen=BEAT_WINDOW)
+        self._next_beat: int | None = None  # number of the beat the next note is expected to be
+        self._reported_bpm: float | None = None  # tempo announced by the sender (display only)
         # tap tempo
         self._taps: deque[float] = deque(maxlen=MAX_TAPS)
 
@@ -71,10 +82,14 @@ class Clock:
         self.source = "internal"
         self._bpm = _clamp_bpm(bpm)
 
-    def use_midi(self, now: float) -> None:
-        """Switch to MIDI clock. Free-runs at the current tempo until ticks arrive."""
+    def use_midi(self, now: float, beats: bool = False) -> None:
+        """Switch to MIDI clock (``beats``: one note per beat instead). Free-runs at the current tempo until it arrives."""
         self._reanchor(now)
         self.source = "midi"
+        self.midi_beats = beats
+        self._beat_times.clear()
+        self._next_beat = None
+        self._reported_bpm = None
         self._tick_times.clear()
         self._last_tick_time = None
         self._next_tick = 0
@@ -99,7 +114,10 @@ class Clock:
         """The current moment is the first beat of a bar."""
         self._reanchor(now)
         bpb = self.beats_per_bar
-        self._anchor_beat = float(round(self._anchor_beat / bpb) * bpb)
+        here = self._anchor_beat
+        self._anchor_beat = float(round(here / bpb) * bpb)
+        if self._next_beat is not None:  # beat notes are numbered against the model: keep them in step
+            self._next_beat += round(self._anchor_beat - here)
 
     # --- MIDI input ----------------------------------------------------------------------
 
@@ -129,6 +147,37 @@ class Clock:
             self._hard_next = False
         else:
             self._anchor_beat, self._anchor_time = model_beat + SLEW_GAIN * err, t
+
+    def on_midi_beat(self, t: float) -> None:
+        """One beat note arrived (beat-notes mode)."""
+        if self.source != "midi" or not self.midi_beats:
+            return
+        if self._last_tick_time is not None and t - self._last_tick_time > max(1.5, 3 * 60.0 / self._bpm):
+            self._beat_times.clear()  # a gap: start over on the next whole beat
+            self._next_beat = None
+        self._beat_times.append(t)
+        self._last_tick_time = t
+        model = self._beat_at(t)
+        if self._next_beat is None:
+            self._anchor_beat, self._anchor_time = float(round(model)), t  # nearest whole beat keeps the bar position
+            self._next_beat = round(model) + 1
+        else:
+            beat = float(self._next_beat)
+            self._next_beat += 1
+            err = beat - model
+            if abs(err) > HARD_RESYNC_BEATS:
+                self._anchor_beat, self._anchor_time = beat, t
+            else:
+                self._anchor_beat, self._anchor_time = model + BEAT_SLEW_GAIN * err, t
+        n = len(self._beat_times)
+        if n >= 2:
+            span = self._beat_times[-1] - self._beat_times[0]
+            if span > 0:
+                self._bpm = _clamp_bpm(60.0 * (n - 1) / span)
+
+    def set_reported_bpm(self, bpm: float) -> None:
+        """Tempo announced by the sender of beat notes; shown, but the measured beat spacing drives the clock."""
+        self._reported_bpm = _clamp_bpm(bpm)
 
     def on_midi_start(self, t: float) -> None:
         self._next_tick = 0
@@ -160,7 +209,7 @@ class Clock:
             beat=beat,
             phase=beat - math.floor(beat),
             bar=beat / self.beats_per_bar,
-            bpm=self._bpm,
+            bpm=self._reported_bpm if self.midi_beats and self._reported_bpm else self._bpm,
             beats_per_bar=self.beats_per_bar,
             source=self.source,
             locked=locked,
@@ -179,7 +228,7 @@ class Clock:
     def _is_locked(self, now: float) -> bool:
         if self._last_tick_time is None:
             return False
-        timeout = max(LOSS_TIMEOUT_S, 4 * 60.0 / (self._bpm * PPQN))
+        timeout = max(LOSS_TIMEOUT_S, 2.5 * 60.0 / self._bpm) if self.midi_beats else max(LOSS_TIMEOUT_S, 4 * 60.0 / (self._bpm * PPQN))
         return now - self._last_tick_time <= timeout
 
 

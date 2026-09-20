@@ -429,3 +429,44 @@ def test_output_state_reports_a_stalled_render_loop(env):
     assert s["presenting"] is False and s["stalled_s"] == 3.2
     c.frame_heartbeat = 103.2
     assert c.state(103.3)["output"]["presenting"] is True  # it recovers as soon as frames flow again
+
+
+MIXXX = "clock: {source: midi, midi_port: mixxx, midi_mode: beats}\n"
+
+
+def test_mixxx_midi_for_light_beat_notes_drive_the_clock(env):
+    c = make(env, MIXXX)
+    assert c.midi_wants() == ("mixxx", None)
+    clk = {"clock"}
+    for k in range(12):
+        c.on_midi(clk, bytes([0x90, 0x32, 0x64]), 100.0 + k * 0.5)  # D, velocity 100: the beat
+        c.on_midi(clk, bytes([0x90, 0x34, 73]), 100.0 + k * 0.5)  # E: tempo 73 + 50
+    s = c.state(105.5 + 0.1)["clock"]
+    assert s["source"] == "midi" and s["locked"] and s["bpm"] == 123
+    assert c.clock._bpm == pytest.approx(120, rel=0.01)  # measured from the beat spacing
+    n = len(c.clock._beat_times)
+    c.on_midi(clk, bytes([0x90, 0x32, 90]), 106.0)  # wrong velocity
+    c.on_midi(clk, bytes([0x90, 0x33, 100]), 106.0)  # wrong note
+    c.on_midi(clk, bytes([0x80, 0x32, 100]), 106.0)  # note-off
+    c.on_midi(clk, bytes([0x90, 0x32, 0]), 106.0)  # note-on with velocity 0
+    c.on_midi(clk, bytes([0xF8]), 106.0)  # a plain clock tick means nothing in this mode
+    assert len(c.clock._beat_times) == n
+
+
+def test_beat_note_settings_are_configurable(env):
+    c = make(env, "clock: {source: midi, midi_port: x, midi_mode: beats, beat_note: 60, beat_velocity: 0, midi_channel: 3, tempo_note: -1}\n")
+    clk = {"clock"}
+    c.on_midi(clk, bytes([0x90, 60, 33]), 100.0)  # wrong channel
+    assert not c.clock._beat_times
+    c.on_midi(clk, bytes([0x92, 60, 33]), 100.0)  # channel 3, any velocity
+    assert len(c.clock._beat_times) == 1
+    c.on_midi(clk, bytes([0x92, 52, 70]), 100.1)  # tempo note switched off
+    assert c.clock._reported_bpm is None
+
+
+def test_switching_between_clock_and_beat_notes_reconfigures_the_clock(env):
+    c = make(env, "clock: {source: midi, midi_port: x}\n")
+    assert not c.clock.midi_beats
+    env[1].write_text(MIXXX)
+    c.poll_files(200.0)
+    assert c.clock.midi_beats
