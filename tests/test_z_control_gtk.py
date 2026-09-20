@@ -252,6 +252,21 @@ def test_outdated_renderer_banner_restarts_the_renderer(win):
     assert started == [1] and not w._restart_pending
 
 
+def test_unchanged_states_do_not_refresh_the_window(win):
+    w, _ = win
+    w.set_connection(True)
+    w.apply_state(st())
+    calls = []
+    real = w.refresh
+    w.refresh = lambda: (calls.append(1), real())[1]
+    moving = st()
+    moving["clock"].update(beat=9.5, phase=0.5, bar=2.4)  # only the beat position moved
+    w.apply_state(moving)
+    assert calls == []
+    w.apply_state(st(mode="random"))
+    assert calls == [1]
+
+
 def test_blackout_remembers_brightness(win):
     w, fake = win
     w.set_connection(True)
@@ -559,6 +574,9 @@ def test_calibration_against_a_live_renderer_core(app, tmp_path, monkeypatch):
             assert time.time() < deadline
         f = rig.core.frame(time.monotonic())  # the renderer is showing the lines the window sent
         assert f.overlay.lines[0] == pytest.approx(cal.session.cal.left)
+        deadline = time.time() + 5
+        while "Calibration in progress" not in "".join(texts(win.banner_box)) and time.time() < deadline:
+            pump(20)  # the state that says "calibrating" travels over the socket
         assert "Calibration in progress" in "".join(texts(win.banner_box))
         cal.finish()
         deadline = time.time() + 5

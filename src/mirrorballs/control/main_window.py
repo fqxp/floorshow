@@ -6,6 +6,7 @@ and sends commands. Offline it still shows the scene files, dimmed.
 
 from __future__ import annotations
 
+import json
 import math
 import subprocess
 import time
@@ -31,7 +32,18 @@ EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the stre
 RIGHT_COLUMN_W = 272
 CONTROLS_MIN_H = 160
 COUNTDOWN_W = 120
+LIBRARY_CHECK_S = 1.0
 RESTART_DELAY_MS = 600  # let the old renderer release its socket before starting the new one
+
+
+def view_key(state: dict[str, Any]) -> str:
+    """Everything in a state that the window shows, minus what moves every sample (the beat position, which
+    the per-frame tick extrapolates itself). Equal keys mean a refresh would change nothing."""
+    c = state["clock"]
+    volatile = {"clock", "fps", "output"}
+    rest = {k: v for k, v in state.items() if k not in volatile}
+    clock = (c["source"], c.get("port"), round(c["bpm"], 1), c["beats_per_bar"], c["locked"], c.get("status"))
+    return json.dumps([rest, clock, round(state.get("fps", 0)), state.get("output")], sort_keys=True, default=str)
 
 
 def param_title(text: str) -> Gtk.Label:
@@ -45,6 +57,8 @@ class BeatTile(Gtk.DrawingArea):
     """68x68 tile that is red on the beat and fades into its ground until the next one. Red is used
     for nothing else in the app."""
 
+    STEPS = 24  # colour levels: the fade lasts ~0.5 s, finer steps would only repaint for no visible gain
+
     def __init__(self) -> None:
         super().__init__()
         self.set_content_width(68)
@@ -56,8 +70,9 @@ class BeatTile(Gtk.DrawingArea):
         self.set_draw_func(self._draw)
 
     def set_intensity(self, value: float) -> None:
-        if abs(value - self.intensity) > 0.004:
-            self.intensity = value
+        level = round(value * self.STEPS) / self.STEPS
+        if level != self.intensity:
+            self.intensity = level
             self.queue_draw()
 
     def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
@@ -88,9 +103,9 @@ class CountdownBar(Gtk.DrawingArea):
         self.set_draw_func(self._draw)
 
     def set_fraction(self, value: float | None) -> None:
-        unchanged = (value is None and self.fraction is None) or (
-            value is not None and self.fraction is not None and abs(value - self.fraction) <= 0.002)
-        if not unchanged:
+        if value is not None:
+            value = round(value * COUNTDOWN_W) / COUNTDOWN_W  # whole pixels: nothing to repaint in between
+        if value != self.fraction:
             self.fraction = value
             self.queue_draw()
 
@@ -138,6 +153,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_scene: str | None = None
         self._every_hold = 0.0
         self._bpm_hold = 0.0
+        self._view_key: str | None = None
+        self._library_check = 0.0
         self._restart_pending = False
         self._bpm_target = 0.0
         self._scroll_acc = 0.0
@@ -679,11 +696,20 @@ class MainWindow(Adw.ApplicationWindow):
         if time.monotonic() < self._bpm_hold and state["clock"]["source"] == "internal":
             state["clock"]["bpm"] = self._bpm_target  # the renderer may not have applied the scroll yet
         self.state_time = t if t is not None else time.monotonic()
+        was_connected = self.connected
         self.starting = False
         self.connected = True
-        if self.library.refresh():
-            self._cards_key = None
-        self.refresh()
+        now = time.monotonic()
+        changed = not was_connected
+        if now >= self._library_check:  # a stat() per scene file: once a second is plenty
+            self._library_check = now + LIBRARY_CHECK_S
+            if self.library.refresh():
+                self._cards_key = None
+                changed = True
+        key = view_key(state)
+        if changed or key != self._view_key:
+            self._view_key = key
+            self.refresh()
         for w in (self.config_dialog, self.calibration_window):
             if w:
                 w.on_state(state)
