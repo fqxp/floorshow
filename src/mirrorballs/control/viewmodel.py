@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
+
+from ..common.protocol import REV
 
 TRANSITIONS = [
     ("crossfade", "Crossfade"), ("cut", "Cut"), ("wipe_lat", "Wipe (latitude)"), ("iris", "Iris"), ("flash", "Flash"),
@@ -14,14 +15,15 @@ LENGTHS = [("¼ bar", 0.25), ("½ bar", 0.5), ("1 bar", 1.0), ("2 bars", 2.0)]
 MAX_HOTKEYS = 8
 
 
-def bars_until_change(state: dict[str, Any] | None, elapsed_s: float = 0.0) -> int | None:
-    """Whole bars left (rounded up, at least 1) until the automatic scene change; None when there is none."""
+def change_progress(state: dict[str, Any] | None, elapsed_s: float = 0.0) -> float | None:
+    """Fraction (1 -> 0) of the current automatic-scene period that is left; None when there is no such period."""
     nxt = state.get("next_change_beat") if state else None
-    if nxt is None:
+    length = state.get("change_interval_beats") if state else None
+    if nxt is None or not length:
         return None
     clock = state["clock"]
     beat = clock["beat"] + elapsed_s * clock["bpm"] / 60.0
-    return max(1, math.ceil((nxt - beat) / max(1, clock["beats_per_bar"])))
+    return min(1.0, max(0.0, (nxt - beat) / length))
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, flo
 
 @dataclass(frozen=True)
 class Banner:
-    kind: str  # "midi_lost" | "scene_error" | "config_error" | "flash_limited" | "output_hidden" | "calibrating"
+    kind: str  # "renderer_outdated" | "midi_lost" | "scene_error" | "config_error" | "flash_limited" | "output_hidden" | "calibrating"
     title: str
     text: str
     action: str | None  # button label; None = a plain notice
@@ -75,6 +77,10 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
     out: list[Banner] = []
     if state.get("calibrating"):
         out.append(Banner("calibrating", "Calibration in progress", "Calibration in progress", "Show window"))
+    if state.get("rev", 0) < REV:
+        out.append(Banner("renderer_outdated", "Renderer is outdated",
+                          "The renderer was started before the controller was updated, so newer features do not work. "
+                          "Restart it to use the new version.", "Restart renderer"))
     output = state.get("output") or {}
     if output.get("presenting") is False:
         out.append(Banner("output_hidden", "Output window",

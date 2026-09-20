@@ -15,7 +15,7 @@ def clock(**kw):
 
 
 def state(**kw):
-    base = dict(clock=clock(), scene="a", scenes=["a"], running=True, calibrating=False, fps=59.6, scene_errors={})
+    base = dict(rev=vm.REV, clock=clock(), scene="a", scenes=["a"], running=True, calibrating=False, fps=59.6, scene_errors={})
     base.update(kw)
     return base
 
@@ -113,12 +113,20 @@ def test_key_to_action_matches_the_shortcut_sheet():
     assert k("space", ctrl=True) is None and k("x") is None  # no accidental triggers
 
 
-def test_bars_until_change_counts_down_and_rounds_up():
-    clock = dict(source="internal", bpm=120.0, beat=1.0, beats_per_bar=4)
-    state = dict(clock=clock, next_change_beat=33.0)
-    assert vm.bars_until_change(state) == 8
-    assert vm.bars_until_change(state, elapsed_s=0.5) == 8  # 1.5 beats in: 7.9 bars left
-    assert vm.bars_until_change(state, elapsed_s=10.0) == 3
-    assert vm.bars_until_change(state, elapsed_s=100.0) == 1  # never shows 0 or less
-    assert vm.bars_until_change(dict(clock=clock, next_change_beat=None)) is None
-    assert vm.bars_until_change(None) is None
+def test_change_progress_shrinks_from_one_to_zero():
+    clock = dict(source="internal", bpm=120.0, beat=0.0, beats_per_bar=4)
+    state = dict(clock=clock, next_change_beat=32.0, change_interval_beats=32.0)
+    assert vm.change_progress(state) == 1.0
+    assert vm.change_progress(state, elapsed_s=8.0) == pytest.approx(0.5)  # 16 of 32 beats
+    assert vm.change_progress(state, elapsed_s=16.0) == 0.0
+    assert vm.change_progress(state, elapsed_s=99.0) == 0.0  # never negative
+    assert vm.change_progress(dict(clock=clock, next_change_beat=None, change_interval_beats=None)) is None
+    assert vm.change_progress(dict(clock=clock)) is None and vm.change_progress(None) is None
+
+
+def test_outdated_renderer_banner():
+    clock = dict(source="internal", bpm=120.0, beat=0.0, beats_per_bar=4, locked=True)
+    old = dict(clock=clock)  # a renderer from before "rev" existed
+    assert [b.kind for b in vm.banners(True, old)] == ["renderer_outdated"]
+    assert vm.banners(True, dict(clock=clock, rev=vm.REV)) == []
+    assert vm.banners(True, dict(clock=clock, rev=vm.REV + 1)) == []

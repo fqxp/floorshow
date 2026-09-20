@@ -20,7 +20,7 @@ if not Gtk.init_check() or Gdk.Display.get_default() is None:  # pragma: no cove
     pytest.skip("no display", allow_module_level=True)
 
 from mirrorballs.common.config import SequenceItem
-from mirrorballs.control import tokens
+from mirrorballs.control import tokens, viewmodel as vm
 from mirrorballs.control.client import RendererClient
 from mirrorballs.control.library import Library
 from mirrorballs.control.main_window import MainWindow
@@ -67,7 +67,7 @@ def scene_dir(tmp_path):
 
 
 def st(scene="alpha", **kw):
-    s = dict(event="state", scene=scene, scenes=["alpha", "beta"], running=True, mode="manual", every_beats=32, master=0.5,
+    s = dict(event="state", rev=vm.REV, scene=scene, scenes=["alpha", "beta"], running=True, mode="manual", every_beats=32, master=0.5,
              params={"w": 5.0, "on": True, "m": "a", "c": [1.0, 0.0, 0.0]}, calibrating=False, fps=60.0, scene_errors={},
              config_error=None, midi={},
              clock=dict(source="internal", port=None, bpm=120.0, beat=2.0, phase=0.0, bar=0.5, beats_per_bar=4, locked=True, status="internal"))
@@ -224,18 +224,32 @@ def test_beat_indicator_switch_is_on_by_default_and_saved(win):
     assert w.store.load().ui.beat_indicator is True
 
 
-def test_countdown_shows_bars_to_the_next_automatic_change(win):
+def test_countdown_bar_shrinks_towards_the_next_automatic_change(win):
     w, _ = win
     w.set_connection(True)
-    w.apply_state(st(mode="manual", next_change_beat=None))
+    w.apply_state(st(mode="manual", next_change_beat=None, change_interval_beats=None))
     w._update_countdown(w.state)
-    assert w.countdown.get_text() == ""
-    w.apply_state(st(mode="random", next_change_beat=34.0))  # beat 2.0 of 4 per bar: 8 bars
+    assert w.countdown.fraction is None
+    w.apply_state(st(mode="random", next_change_beat=34.0, change_interval_beats=32.0))  # beat 2.0: 32 of 32 left
     w._update_countdown(w.state)
-    assert w.countdown.get_text() == "Next scene in 8 bars"
-    w.apply_state(st(mode="sequence", next_change_beat=6.0))
+    assert w.countdown.fraction == pytest.approx(1.0, abs=0.01)
+    w.apply_state(st(mode="random", next_change_beat=18.0, change_interval_beats=32.0))
     w._update_countdown(w.state)
-    assert w.countdown.get_text() == "Next scene in 1 bar"
+    assert w.countdown.fraction == pytest.approx(0.5, abs=0.01)
+
+
+def test_outdated_renderer_banner_restarts_the_renderer(win):
+    w, fake = win
+    w.set_connection(True)
+    old = {k: v for k, v in st().items() if k != "rev"}  # an old renderer reports no "rev"
+    w.apply_state(old)
+    w.act_banner(next(b for b in vm.banners(True, old) if b.kind == "renderer_outdated"))
+    assert fake.sent[-1][0] == "quit" and w._restart_pending
+    started = []
+    w.launch_renderer = lambda: started.append(1)
+    w.set_connection(False)
+    pump(900)
+    assert started == [1] and not w._restart_pending
 
 
 def test_blackout_remembers_brightness(win):

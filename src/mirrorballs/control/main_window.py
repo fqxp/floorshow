@@ -30,6 +30,8 @@ BPM_HOLD_S = 0.6  # likewise for a tempo changed with the scroll wheel
 EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the streamed value until the renderer has applied it
 RIGHT_COLUMN_W = 272
 CONTROLS_MIN_H = 160
+COUNTDOWN_W = 120
+RESTART_DELAY_MS = 600  # let the old renderer release its socket before starting the new one
 
 
 def param_title(text: str) -> Gtk.Label:
@@ -72,6 +74,39 @@ class BeatTile(Gtk.DrawingArea):
         cr.fill()
 
 
+class CountdownBar(Gtk.DrawingArea):
+    """Thin bar for the time left until the next automatic scene change. It shrinks towards the right
+    and is empty (the ground colour) at the moment the transition starts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_content_width(COUNTDOWN_W)
+        self.set_content_height(6)
+        self.set_valign(Gtk.Align.CENTER)
+        self.fraction: float | None = None
+        self.dark = True
+        self.set_draw_func(self._draw)
+
+    def set_fraction(self, value: float | None) -> None:
+        unchanged = (value is None and self.fraction is None) or (
+            value is not None and self.fraction is not None and abs(value - self.fraction) <= 0.002)
+        if not unchanged:
+            self.fraction = value
+            self.queue_draw()
+
+    def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
+        if self.fraction is None:
+            return
+        pal = tokens.palette(self.dark)
+        cr.set_source_rgb(*tokens.hex_to_rgb(pal["well"]))
+        cr.rectangle(0, 0, w, h)
+        cr.fill()
+        left = w * self.fraction
+        cr.set_source_rgb(*tokens.hex_to_rgb(pal["acc"]))
+        cr.rectangle(w - left, 0, left, h)
+        cr.fill()
+
+
 class MainWindow(Adw.ApplicationWindow):
     def __init__(
         self,
@@ -103,6 +138,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_scene: str | None = None
         self._every_hold = 0.0
         self._bpm_hold = 0.0
+        self._restart_pending = False
         self._bpm_target = 0.0
         self._scroll_acc = 0.0
         self._tap_timer = 0
@@ -222,9 +258,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.next_btn = push_button("Next", "tall", kbd_text="]", icon_name="go-next-symbolic")
         self.prev_btn.connect("clicked", lambda *_: self.act_step(-1))
         self.next_btn.connect("clicked", lambda *_: self.act_step(+1))
-        self.countdown = label("", "secondary", xalign=1.0)
-        self.countdown.set_tooltip_text("Bars until the next automatic scene change")
-        self._countdown_text = ""
+        self.countdown = CountdownBar()
+        self.countdown.set_tooltip_text("Time until the next automatic scene change")
         head = hbox(8, label("Scenes", "panel-title", hexpand=True), self.countdown, self.prev_btn, self.next_btn)
 
         self.manual_btn = Gtk.ToggleButton(label="Manual")
@@ -549,6 +584,9 @@ class MainWindow(Adw.ApplicationWindow):
             p = self.library.path_of(banner.scene_id)
             if p:
                 Gtk.FileLauncher.new(Gio.File.new_for_path(str(p))).launch(self, None, None)
+        elif banner.kind == "renderer_outdated":
+            self._restart_pending = True
+            self.send("quit")
         elif banner.kind == "config_error":
             Gtk.FileLauncher.new(Gio.File.new_for_path(str(self.store.path))).launch(self, None, None)
         elif banner.kind == "calibrating":
@@ -628,6 +666,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.starting = False
         else:
             self.state = None
+            if self._restart_pending:
+                self._restart_pending = False
+                GLib.timeout_add(RESTART_DELAY_MS, lambda: self.start_renderer() or False)
         self.refresh()
         for w in (self.config_dialog, self.calibration_window):
             if w:
@@ -903,11 +944,7 @@ class MainWindow(Adw.ApplicationWindow):
         return True  # keep ticking
 
     def _update_countdown(self, st: dict[str, Any] | None) -> None:
-        bars = vm.bars_until_change(st, time.monotonic() - self.state_time) if st else None
-        text = "" if bars is None else f"Next scene in {bars} bar{'s' if bars != 1 else ''}"
-        if text != self._countdown_text:
-            self._countdown_text = text
-            self.countdown.set_text(text)
+        self.countdown.set_fraction(vm.change_progress(st, time.monotonic() - self.state_time) if st else None)
 
     def _set_pip(self, idx: int) -> None:
         if idx == self._pip_current:
@@ -917,6 +954,8 @@ class MainWindow(Adw.ApplicationWindow):
             set_classes(p, {"current": i == idx})
 
     def set_dark(self, dark: bool) -> None:
+        self.countdown.dark = dark
+        self.countdown.queue_draw()
         self.beat_tile.dark = dark
         self.beat_tile.queue_draw()
 

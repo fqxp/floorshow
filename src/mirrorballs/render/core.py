@@ -553,24 +553,32 @@ class Core:
         return FrameSpec(cal=cal, incoming=incoming, outgoing=outgoing, mix=mix, transition=ttype,
                          master=master, black=black)
 
-    def next_change_beat(self, snap) -> float | None:
-        """Beat at which the director will switch scene next; None in manual mode or when it never will."""
+    def next_change(self, snap) -> tuple[float, float] | tuple[None, None]:
+        """(beat of the director's next scene change, length in beats of the period it ends), or (None, None)
+        in manual mode or when it never will."""
+        none = (None, None)
         if self.mode == "manual" or self.cal_owner is not None or not self.scenes:
-            return None
-        if self.mode == "sequence" and self._sequence():
-            nxt = self._seq_next
-            if nxt is None:  # the sequence starts on the next tick
-                return snap.beat
-            return None if nxt == float("inf") else nxt
-        return (int(snap.beat // self.every_beats) + 1) * float(self.every_beats)
+            return none
+        items = self._sequence()
+        if self.mode == "sequence" and items:
+            if self._seq_next is None or self._seq_index >= len(items):  # the sequence starts on the next tick
+                length = items[0].bars * snap.beats_per_bar
+                return snap.beat + length, float(length)
+            if self._seq_next == float("inf"):
+                return none
+            return self._seq_next, float(items[self._seq_index].bars * snap.beats_per_bar)
+        every = float(self.every_beats)
+        return (int(snap.beat // every) + 1) * every, every
 
     # --- state for clients ---------------------------------------------------------------
 
     def state(self, now: float) -> dict[str, Any]:
         snap = self.clock.snapshot(now)
         cfg = self.config
+        next_change = self.next_change(snap)
         return {
             "event": "state",
+            "rev": P.REV,
             "clock": {
                 "source": snap.source,
                 "port": cfg.clock.midi_port if snap.source == "midi" else None,
@@ -587,7 +595,8 @@ class Core:
             "running": self.running,
             "mode": self.mode,
             "every_beats": self.every_beats,
-            "next_change_beat": self.next_change_beat(snap),
+            "next_change_beat": next_change[0],
+            "change_interval_beats": next_change[1],
             "master": self.master,
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
