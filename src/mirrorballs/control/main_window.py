@@ -26,6 +26,7 @@ from .widgets import hbox, icon, kbd, label, push_button, set_classes, vbox  # n
 
 START_TIMEOUT_S = 12.0
 TAP_SETTLE_S = 2.5  # save the tapped tempo this long after the last tap
+BPM_HOLD_S = 0.6  # likewise for a tempo changed with the scroll wheel
 EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the streamed value until the renderer has applied it
 RIGHT_COLUMN_W = 272
 CONTROLS_MIN_H = 160
@@ -101,6 +102,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._brightness_timer = 0
         self._pending_scene: str | None = None
         self._every_hold = 0.0
+        self._bpm_hold = 0.0
+        self._bpm_target = 0.0
+        self._scroll_acc = 0.0
         self._tap_timer = 0
         self.config_dialog: Any = None
         self.calibration_window: Any = None
@@ -197,8 +201,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.pips_box = hbox(8, *self._pips, margin_start=3)
         self.tap_btn = push_button("Tap tempo", kbd_text="T")
         self.tap_btn.connect("clicked", lambda *_: self.act_tap())
-        strip_right = vbox(10, self.source_chip, hbox(12, self.pips_box, Gtk.Box(hexpand=True), self.tap_btn), hexpand=True,
-                           valign=Gtk.Align.CENTER)
+        scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
+        scroll.connect("scroll", self._on_bpm_scroll)
+        self.source_chip.add_controller(scroll)
+        self.indicator_sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.cfg.ui.beat_indicator)
+        self.indicator_sw.add_css_class("mb-switch")
+        self.indicator_sw.set_tooltip_text("Show the beat and bar indicator")
+        self.indicator_sw.connect("notify::active", self._on_indicator_toggled)
+        self.indicator_row = hbox(8, label("Indicator", "secondary"), self.indicator_sw)
+        self._apply_indicator()
+        strip_right = vbox(10, hbox(12, self.source_chip, Gtk.Box(hexpand=True), self.indicator_row),
+                           hbox(12, self.pips_box, Gtk.Box(hexpand=True), self.tap_btn), hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, self.beat_tile, strip_right, hexpand=True)
         self.clock_panel.add_css_class("panel")
         self.clock_panel.set_margin_top(0)
@@ -418,8 +431,47 @@ class MainWindow(Adw.ApplicationWindow):
         self._start_deadline = time.monotonic() + START_TIMEOUT_S
         self.refresh()
 
+    def _on_indicator_toggled(self, sw: Gtk.Switch, *_a: Any) -> None:
+        self._apply_indicator()
+        if self._ui_guard:
+            return
+        try:
+            self.store.update({"ui": {"beat_indicator": sw.get_active()}})
+            self.cfg = self.store.load()
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the setting: {e}")
+
+    def _apply_indicator(self) -> None:
+        # Invisible, not removed: the panel must keep its size.
+        on = self.indicator_sw.get_active()
+        self.beat_tile.set_opacity(1.0 if on else 0.0)
+        self.pips_box.set_opacity(1.0 if on else 0.0)
+
+    def _on_bpm_scroll(self, _ctl: Gtk.EventControllerScroll, _dx: float, dy: float) -> bool:
+        """Scroll up = faster, one BPM per wheel step. Only the internal clock has a tempo to set."""
+        clock = (self.state or {}).get("clock")
+        if not self.connected or self.calibrating or not clock or clock["source"] != "internal":
+            return False
+        self._scroll_acc += -dy
+        steps = int(self._scroll_acc)
+        if steps == 0:
+            return True
+        self._scroll_acc -= steps
+        now = time.monotonic()
+        base = self._bpm_target if now < self._bpm_hold else clock["bpm"]
+        self._bpm_target = float(max(20, min(300, round(base) + steps)))
+        self._bpm_hold = now + BPM_HOLD_S
+        clock["bpm"] = self._bpm_target
+        self.send("bpm.set", bpm=self._bpm_target)
+        self._refresh_clock(self.state)
+        self._schedule_persist_tempo()
+        return True
+
     def act_tap(self) -> None:
         self.send("tap")
+        self._schedule_persist_tempo()
+
+    def _schedule_persist_tempo(self) -> None:
         # Once the tapping stops, remember the tempo: the design says tap tempo sets the internal BPM.
         if self._tap_timer:
             GLib.source_remove(self._tap_timer)
@@ -580,6 +632,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def apply_state(self, state: dict[str, Any], t: float | None = None) -> None:
         self.state = state
+        if time.monotonic() < self._bpm_hold and state["clock"]["source"] == "internal":
+            state["clock"]["bpm"] = self._bpm_target  # the renderer may not have applied the scroll yet
         self.state_time = t if t is not None else time.monotonic()
         self.starting = False
         self.connected = True
@@ -654,6 +708,8 @@ class MainWindow(Adw.ApplicationWindow):
         text, warn = vm.clock_text(st["clock"] if st else None, self.cfg.clock.source, self.cfg.clock.midi_port,
                                    self.cfg.clock.bpm)
         self.source_chip.set_text(text)
+        internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
+        self.source_chip.set_tooltip_text("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock")
         set_classes(self.source_chip, {"warn": warn})
         set_classes(self.pips_box, {"dim": st is None})
         if st:
@@ -831,7 +887,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_tick(self, _w: Gtk.Widget, _clock: Any) -> bool:
         st = self.state if self.connected else None
-        if st is None:
+        if st is None or not self.indicator_sw.get_active():
             self.beat_tile.set_intensity(0.0)
             self._set_pip(-1)
         else:

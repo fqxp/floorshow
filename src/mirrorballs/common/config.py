@@ -71,8 +71,11 @@ class Pool(_Base):
     ids: list[str] = []
 
 
+TRANSITION_TYPES = ("crossfade", "cut", "wipe_lat", "iris", "flash")  # what "random" picks from
+
+
 class TransitionConfig(_Base):
-    type: Literal["crossfade", "cut", "wipe_lat", "iris", "flash"] = "crossfade"
+    type: Literal["crossfade", "cut", "wipe_lat", "iris", "flash", "random"] = "crossfade"
     beats: float = Field(1.0, ge=0)
 
 
@@ -117,6 +120,10 @@ class SafetyConfig(_Base):
     max_flashes_per_s: float = Field(3.0, ge=0.5, le=10)
 
 
+class UiConfig(_Base):
+    beat_indicator: bool = True  # the beat tile and bar pips in the controller
+
+
 class Config(_Base):
     schema_version: int = Field(SCHEMA_VERSION, alias="schema")
     clock: ClockConfig = ClockConfig()
@@ -126,6 +133,7 @@ class Config(_Base):
     midi: MidiConfig = MidiConfig()
     bindings: Bindings = Bindings()
     safety: SafetyConfig = SafetyConfig()
+    ui: UiConfig = UiConfig()
 
 
 def _yaml() -> YAML:

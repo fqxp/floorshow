@@ -64,6 +64,28 @@ def test_scene_transition_precedence_uses_scene_then_config(env):
     assert c.frame(110.25).transition == "flash"
 
 
+def test_random_transition_picks_a_concrete_type_on_every_scene_change(env):
+    c = make(env, "director: {transition: {type: random, beats: 2}}\n")
+    seen = set()
+    for i in range(40):
+        cmd(c, {"cmd": "scene.set", "scene": "b" if i % 2 == 0 else "c"}, now=100.0 + 10 * i)
+        t = c.frame(100.0 + 10 * i + 0.1).transition
+        if t is not None:
+            seen.add(t)
+    assert seen and "random" not in seen and len(seen) >= 3
+    assert seen <= {"crossfade", "cut", "wipe_lat", "iris", "flash"}
+
+
+def test_bpm_set_retunes_the_internal_clock_and_keeps_the_beat_continuous(env):
+    c = make(env, "clock: {source: internal, bpm: 120}\n")
+    before = c.clock.snapshot(101.0).beat
+    assert cmd(c, {"cmd": "bpm.set", "bpm": 90}, now=101.0)["ok"]
+    snap = c.clock.snapshot(101.0)
+    assert snap.bpm == 90 and snap.beat == pytest.approx(before)
+    with pytest.raises(ValueError):
+        cmd(c, {"cmd": "bpm.set", "bpm": 5}, now=101.0)
+
+
 def test_next_prev_wrap(env):
     c = make(env)
     for expect in ("b", "c", "a"):

@@ -190,6 +190,40 @@ def test_window_and_column_sizes_do_not_depend_on_the_scene(win):
     assert sizes[0] == sizes[1] == sizes[2]
 
 
+def test_scrolling_the_bpm_chip_sets_the_internal_tempo_only(win):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    assert "Scroll" in w.source_chip.get_tooltip_text()
+    assert w._on_bpm_scroll(None, 0, -1.0)  # wheel up: one BPM faster
+    assert fake.sent[-1] == ("bpm.set", {"bpm": 121.0}) and w.source_chip.get_text() == "Internal · 121 BPM"
+    w.apply_state(st())  # a stale state does not undo it
+    assert w.source_chip.get_text() == "Internal · 121 BPM"
+    w._on_bpm_scroll(None, 0, 1.0)
+    w._on_bpm_scroll(None, 0, 1.0)
+    assert fake.sent[-1] == ("bpm.set", {"bpm": 119.0})
+    fake.sent.clear()
+    w._on_bpm_scroll(None, 0, -0.3)  # a touchpad's small deltas add up
+    assert fake.sent == []
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", bpm=124.0)))
+    w._bpm_hold = 0.0
+    assert not w._on_bpm_scroll(None, 0, -1.0) and fake.sent == []
+    assert "MIDI" in w.source_chip.get_tooltip_text()
+
+
+def test_beat_indicator_switch_is_on_by_default_and_saved(win):
+    w, _ = win
+    assert w.indicator_sw.get_active() and w.beat_tile.get_opacity() == 1.0 and w.pips_box.get_opacity() == 1.0
+    before = w.clock_panel.get_width(), w.clock_panel.get_height()
+    w.indicator_sw.set_active(False)
+    pump(100)
+    assert w.beat_tile.get_opacity() == 0.0 and w.pips_box.get_opacity() == 0.0
+    assert (w.clock_panel.get_width(), w.clock_panel.get_height()) == before  # the layout stays put
+    assert w.store.load().ui.beat_indicator is False
+    w.indicator_sw.set_active(True)
+    assert w.store.load().ui.beat_indicator is True
+
+
 def test_blackout_remembers_brightness(win):
     w, fake = win
     w.set_connection(True)

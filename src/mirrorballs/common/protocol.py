@@ -49,6 +49,11 @@ class ModeSet(_Cmd):
     every: Every | None = None
 
 
+class BpmSet(_Cmd):
+    cmd: Literal["bpm.set"]
+    bpm: float = Field(ge=20, le=300)  # internal clock only; a MIDI clock owns the tempo
+
+
 class MasterSet(_Cmd):
     cmd: Literal["master.set"]
     value: float = Field(ge=0, le=1)
@@ -101,7 +106,7 @@ class Simple(_Cmd):
 
 
 Command = Annotated[
-    Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | MasterSet
+    Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
     | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | Simple,
     Field(discriminator="cmd"),
 ]

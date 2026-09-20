@@ -97,7 +97,7 @@ class Layer(_Base):
 
 
 class TransitionDef(_Base):
-    type: Literal["crossfade", "cut", "wipe_lat", "iris", "flash"] = "crossfade"
+    type: Literal["crossfade", "cut", "wipe_lat", "iris", "flash", "random"] = "crossfade"
     beats: float = Field(1.0, ge=0)
     ease: Literal["linear", "in", "out", "in_out"] = "in_out"
 

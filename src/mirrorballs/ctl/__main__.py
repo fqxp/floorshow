@@ -17,7 +17,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("scenes", help="list scene ids (marks the current one)")
     s = sub.add_parser("scene", help="switch scene")
     s.add_argument("name")
-    s.add_argument("--transition", choices=["cut", "crossfade", "wipe_lat", "iris", "flash"])
+    s.add_argument("--transition", choices=["cut", "crossfade", "wipe_lat", "iris", "flash", "random"])
     s.add_argument("--beats", type=float, default=1.0, help="transition length in beats")
     for name, help_ in (("next", "next scene"), ("prev", "previous scene"), ("start", "un-blank the output"),
                         ("stop", "fade to black"), ("tap", "tap tempo (internal clock)"),

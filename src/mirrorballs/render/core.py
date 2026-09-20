@@ -15,7 +15,7 @@ from typing import Any
 
 from ..common import protocol as P
 from ..common.clock import Clock
-from ..common.config import CalibrationConfig, Config, ConfigError, load_config
+from ..common.config import TRANSITION_TYPES, CalibrationConfig, Config, ConfigError, load_config
 from ..common.geometry import Calibration
 from ..common.scene import Scene, SceneError, load_library, make_env
 from .flashguard import FlashGuard
@@ -217,6 +217,8 @@ class Core:
                 t = self.config.director.transition
                 transition = (t.type, t.beats, "in_out")
         ttype, beats, ease = transition
+        if ttype == "random":  # a fresh pick on every scene change
+            ttype = self.rng.choice(TRANSITION_TYPES)
         self.previous = self.current
         self.current = sid
         self._scene_start[sid] = snap.beat
@@ -329,6 +331,9 @@ class Core:
                 self.every_beats = cmd.every.in_beats(self.clock.beats_per_bar)
             self._last_slot = None
             self._seq_next = None
+        elif isinstance(cmd, P.BpmSet):
+            if self.clock.source == "internal":
+                self.clock.use_internal(cmd.bpm, now)  # keeps the beat continuous
         elif isinstance(cmd, P.TestPatternSet):
             self.test_pattern = cmd.on
         elif isinstance(cmd, P.MidiLearn):

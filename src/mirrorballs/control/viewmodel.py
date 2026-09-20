@@ -7,6 +7,7 @@ from typing import Any
 
 TRANSITIONS = [
     ("crossfade", "Crossfade"), ("cut", "Cut"), ("wipe_lat", "Wipe (latitude)"), ("iris", "Iris"), ("flash", "Flash"),
+    ("random", "Random"),
 ]
 LENGTHS = [("¼ bar", 0.25), ("½ bar", 0.5), ("1 bar", 1.0), ("2 bars", 2.0)]
 MAX_HOTKEYS = 8
