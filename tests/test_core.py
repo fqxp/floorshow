@@ -450,6 +450,8 @@ def test_mixxx_midi_for_light_beat_notes_drive_the_clock(env):
     c.on_midi(clk, bytes([0x80, 0x32, 100]), 106.0)  # note-off
     c.on_midi(clk, bytes([0x90, 0x32, 0]), 106.0)  # note-on with velocity 0
     c.on_midi(clk, bytes([0xF8]), 106.0)  # a plain clock tick means nothing in this mode
+    c.on_midi(clk, bytes([0x90, 0x30, 0x64]), 106.0)  # deck change (C, 100 + deck): not a beat
+    c.on_midi(clk, bytes([0x80, 0x32, 0]), 106.0)  # the script's second note-off form
     assert len(c.clock._beat_times) == n
 
 

@@ -2,7 +2,7 @@
 
     uv run python tools/midi_clock.py --bpm 128            # runs until Ctrl-C
     uv run python tools/midi_clock.py --bpm 128 --measure 10   # also receives its own clock, prints jitter
-    uv run python tools/midi_clock.py --bpm 128 --beat-notes   # one note per beat, like Mixxx's "MIDI for light"
+    uv run python tools/midi_clock.py --bpm 128 --beat-notes   # the messages of Mixxx's "MIDI for light" script
 
 Creates an ALSA sequencer output port named "mirrorballs test clock", sends Start, then 24 ticks
 per beat. Pick that port as the clock source in the app.
@@ -19,16 +19,20 @@ CLOCK, START, STOP = 0xF8, 0xFA, 0xFC
 
 
 def beat_notes(out: rtmidi.MidiOut, bpm: float) -> None:
+    """The messages of Mixxx's Midi_for_light script (channel 1): on every beat note-on D (50, velocity 100) and
+    note-on E (52, value BPM - 50), half a beat later the beat's note-off in both forms the script sends."""
     period = 60.0 / bpm
     tempo = min(127, max(0, round(bpm) - 50))
-    print(f"sending a beat note every {period * 1000:.1f} ms ({bpm} BPM) on '{PORT_NAME}', Ctrl-C to stop")
+    print(f"sending Midi_for_light beats every {period * 1000:.1f} ms ({bpm} BPM) on '{PORT_NAME}', Ctrl-C to stop")
+    out.send_message([0x90, 0x30, 0x64])  # deck change: deck 1
     start, k = time.monotonic(), 0
     try:
         while True:
-            while (dt := start + k * period - time.monotonic()) > 0:
-                time.sleep(dt - 0.0005 if dt > 0.001 else 0)
-            out.send_message([0x90, 50, 100])
-            out.send_message([0x90, 52, tempo])
+            for offset, messages in ((0.0, ([0x90, 50, 100], [0x90, 52, tempo])), (period / 2, ([0x90, 50, 0], [0x80, 50, 0]))):
+                while (dt := start + k * period + offset - time.monotonic()) > 0:
+                    time.sleep(dt - 0.0005 if dt > 0.001 else 0)
+                for m in messages:
+                    out.send_message(m)
             k += 1
     except KeyboardInterrupt:
         pass
