@@ -19,6 +19,7 @@ except (ValueError, ImportError):  # pragma: no cover
 if not Gtk.init_check() or Gdk.Display.get_default() is None:  # pragma: no cover
     pytest.skip("no display", allow_module_level=True)
 
+from mirrorballs.common.config import SequenceItem
 from mirrorballs.control import tokens
 from mirrorballs.control.client import RendererClient
 from mirrorballs.control.library import Library
@@ -142,6 +143,51 @@ def test_commands_sent_by_the_ui(win):
     n = len(fake.sent)
     w.run_action("scene-key", "2")
     assert len(fake.sent) == n
+
+
+def test_quit_renderer_is_disabled_while_no_renderer_runs(win):
+    w, _ = win
+    assert not w.lookup_action("quit-renderer").get_enabled()
+    w.set_connection(True)
+    w.apply_state(st())
+    assert w.lookup_action("quit-renderer").get_enabled()
+    w.set_connection(False)
+    assert not w.lookup_action("quit-renderer").get_enabled()
+
+
+def test_every_stepper_works_in_sequence_mode_and_survives_state_updates(win):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st(mode="sequence", every_beats=32))
+    assert w.every_bars == 8
+    w._set_every(9)
+    assert fake.sent[-1] == ("mode.set", {"mode": "sequence", "every": {"bars": 9}})
+    w.apply_state(st(mode="sequence", every_beats=32))  # a state from before the renderer applied the change
+    assert w.every_bars == 9 and "<b>9</b>" in w.every_label.get_label()
+    w._every_hold = 0.0
+    w.apply_state(st(mode="sequence", every_beats=36))
+    assert w.every_bars == 9
+
+
+def test_every_stepper_is_off_when_a_sequence_sets_its_own_lengths(win):
+    w, _ = win
+    w.set_connection(True)
+    w.apply_state(st(mode="sequence"))
+    assert w.every_label.get_parent().get_sensitive()
+    w.cfg.director.sequence = [SequenceItem(scene="alpha", bars=4)]
+    w.refresh()
+    assert not w.every_label.get_parent().get_sensitive()
+
+
+def test_window_and_column_sizes_do_not_depend_on_the_scene(win):
+    w, _ = win
+    w.set_connection(True)
+    sizes = []
+    for scene, params in (("beta", {}), ("alpha", st()["params"]), ("beta", {})):
+        w.apply_state(st(scene=scene, params=params))
+        pump(150)
+        sizes.append([(x.get_width(), x.get_height()) for x in (w, w.scenes_panel, w.controls_panel, w.master_panel)])
+    assert sizes[0] == sizes[1] == sizes[2]
 
 
 def test_blackout_remembers_brightness(win):

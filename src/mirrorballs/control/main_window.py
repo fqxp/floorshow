@@ -15,7 +15,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from ..common.scene import ParamDef  # noqa: E402
 from . import tokens, viewmodel as vm  # noqa: E402
@@ -26,6 +26,16 @@ from .widgets import hbox, icon, kbd, label, push_button, set_classes, vbox  # n
 
 START_TIMEOUT_S = 12.0
 TAP_SETTLE_S = 2.5  # save the tapped tempo this long after the last tap
+EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the streamed value until the renderer has applied it
+RIGHT_COLUMN_W = 272
+CONTROLS_MIN_H = 160
+
+
+def param_title(text: str) -> Gtk.Label:
+    lb = label(text, hexpand=True)
+    lb.set_ellipsize(Pango.EllipsizeMode.END)  # a long declared label must not widen the column
+    lb.set_tooltip_text(text)
+    return lb
 
 
 class BeatTile(Gtk.DrawingArea):
@@ -70,7 +80,7 @@ class MainWindow(Adw.ApplicationWindow):
         store: ConfigStore,
         launch_renderer: Any = None,
     ):
-        super().__init__(application=app, title="Mirrorballs", default_width=960, default_height=620)
+        super().__init__(application=app, title="Mirrorballs", default_width=960, default_height=700)
         self.set_size_request(720, 520)
         self.add_css_class("mb")
         self.client, self.library, self.store, self.launch_renderer = client, library, store, launch_renderer
@@ -90,6 +100,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._master_before_blackout = 0.85
         self._brightness_timer = 0
         self._pending_scene: str | None = None
+        self._every_hold = 0.0
         self._tap_timer = 0
         self.config_dialog: Any = None
         self.calibration_window: Any = None
@@ -142,7 +153,8 @@ class MainWindow(Adw.ApplicationWindow):
         left.append(self._build_scenes_panel())
         self.content.append(left)
 
-        right = vbox(12, width_request=272)
+        right = vbox(12, width_request=RIGHT_COLUMN_W, hexpand=False)
+        right.set_overflow(Gtk.Overflow.HIDDEN)  # whatever a scene declares, this column keeps its width
         right.append(self._build_controls_panel())
         right.append(self._build_master_panel())
         self.content.append(right)
@@ -282,8 +294,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_controls_panel(self) -> Gtk.Widget:
         self.controls_title = label("", "secondary")
+        self.controls_title.set_ellipsize(Pango.EllipsizeMode.END)
         self.controls_body = vbox(14, vexpand=True)
-        panel = vbox(12, vbox(2, label("Scene controls", "panel-title"), self.controls_title), self.controls_body, vexpand=True)
+        # The body scrolls instead of asking for room: its size must not depend on the scene, or the
+        # window and both columns would change size on every scene change.
+        scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=CONTROLS_MIN_H,
+                                      propagate_natural_height=False, propagate_natural_width=False)
+        scroller.set_child(self.controls_body)
+        panel = vbox(12, vbox(2, label("Scene controls", "panel-title"), self.controls_title), scroller, vexpand=True)
         panel.add_css_class("panel")
         self.controls_panel = panel
         return panel
@@ -496,9 +514,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _set_every(self, bars: int) -> None:
         self.every_bars = max(1, min(64, bars))
+        self._every_hold = time.monotonic() + EVERY_HOLD_S
         self.every_label.set_markup(f"Every <b>{self.every_bars}</b> bars")
-        if self.random_btn.get_active() and not self._ui_guard:
+        if self._ui_guard:
+            return
+        if self.random_btn.get_active():
             self.send("mode.set", mode="random", every={"bars": self.every_bars})
+        elif self.sequence_btn.get_active():
+            self.send("mode.set", mode="sequence", every={"bars": self.every_bars})
+
+    def _sequence_configured(self) -> bool:
+        """A configured sequence sets its own bars per scene, so the global stepper does not apply."""
+        ids = set(self.library.ids())
+        return any(i.scene in ids for i in self.cfg.director.sequence)
 
     def _on_transition_changed(self, *_a: Any) -> None:
         if self._ui_guard:
@@ -588,6 +616,10 @@ class MainWindow(Adw.ApplicationWindow):
             for w in (self.prev_btn, self.next_btn, self.manual_btn.get_parent(), self.every_label.get_parent(),
                       self.trans_dd, self.len_dd, self.grid):
                 w.set_sensitive(live)
+            fixed_bars = self.sequence_btn.get_active() and self._sequence_configured()
+            stepper = self.every_label.get_parent()
+            stepper.set_sensitive(live and not fixed_bars)
+            stepper.set_tooltip_text("Each scene of the sequence has its own length (Configuration › Director)" if fixed_bars else None)
             set_classes(self.scenes_panel, {"disabled-area": offline and bool(self.library.ids())})
             for w in (self.controls_panel, self.master_panel):
                 set_classes(w, {"disabled-area": offline})
@@ -596,6 +628,7 @@ class MainWindow(Adw.ApplicationWindow):
             set_classes(self.clock_panel, {"disabled-area": offline})
             self.clock_panel.set_sensitive(not self.calibrating)
             self.tap_btn.set_sensitive(self.connected and not self.calibrating)
+            self.lookup_action("quit-renderer").set_enabled(self.connected)
             self.run_btn.set_sensitive(not self.calibrating)
         finally:
             self._ui_guard = False
@@ -640,7 +673,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.manual_btn.set_active(mode not in ("random", "sequence"))
         self.random_btn.set_active(mode == "random")
         self.sequence_btn.set_active(mode == "sequence")
-        if st and mode in ("random", "sequence"):
+        if st and mode in ("random", "sequence") and time.monotonic() >= self._every_hold:
             self.every_bars = max(1, round(st["every_beats"] / st["clock"]["beats_per_bar"]))
         self.every_label.set_markup(f"Every <b>{self.every_bars}</b> bars")
         self.trans_dd.set_selected(self.trans_idx)
@@ -721,26 +754,26 @@ class MainWindow(Adw.ApplicationWindow):
 
             scale.connect("value-changed", changed)
             self._param_widgets[name] = ("scale", scale, changed)
-            return vbox(4, hbox(0, label(title, hexpand=True), value), scale)
+            return vbox(4, hbox(0, param_title(title), value), scale)
         if p.type == "bool":
             sw = Gtk.Switch(valign=Gtk.Align.CENTER)
             sw.add_css_class("mb-switch")
             sw.connect("notify::active", lambda s, _p, name=name: (not self._ui_guard) and self.send("param.set", name=name, value=s.get_active()))
             self._param_widgets[name] = ("switch", sw, None)
-            return hbox(8, label(title, hexpand=True), sw)
+            return hbox(8, param_title(title), sw)
         if p.type == "choice":
             choices = p.choices or []
             dd = Gtk.DropDown.new_from_strings(choices)
             dd.add_css_class("mb-dd")
             dd.connect("notify::selected", lambda d, _p, name=name, ch=choices: (not self._ui_guard) and self.send("param.set", name=name, value=ch[d.get_selected()]))
             self._param_widgets[name] = ("choice", dd, choices)
-            return vbox(4, label(title), dd)
+            return vbox(4, param_title(title), dd)
         # colour
         cb = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog())
         cb.connect("notify::rgba", lambda b, _p, name=name: (not self._ui_guard) and self.send(
             "param.set", name=name, value=[round(b.get_rgba().red, 4), round(b.get_rgba().green, 4), round(b.get_rgba().blue, 4)]))
         self._param_widgets[name] = ("color", cb, None)
-        return hbox(8, label(title, hexpand=True), cb)
+        return hbox(8, param_title(title), cb)
 
     def _update_param_values(self, values: dict[str, Any]) -> None:
         for name, (kind, w, extra) in self._param_widgets.items():
