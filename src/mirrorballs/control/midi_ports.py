@@ -1,6 +1,10 @@
-"""MIDI input ports available to choose from (the controller lists them; the renderer opens them)."""
+"""MIDI input ports available to choose from (the controller lists them; the renderer opens them).
+
+Sequencer ports come first, then raw MIDI devices ("VirMIDI 1-0 (raw hw:1,0)")."""
 
 from __future__ import annotations
+
+from ..common.rawmidi import list_raw_ports
 
 
 def list_input_ports() -> list[str]:
@@ -11,5 +15,5 @@ def list_input_ports() -> list[str]:
         ports = probe.get_ports()
         probe.delete() if hasattr(probe, "delete") else None
     except Exception:  # noqa: BLE001 - no ALSA sequencer, or rtmidi missing
-        return []
-    return [p for p in ports if "midi through" not in p.lower()]
+        ports = []
+    return [p for p in ports if "midi through" not in p.lower()] + list(list_raw_ports())

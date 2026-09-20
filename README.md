@@ -48,11 +48,13 @@ clock:
   tempo_offset: 50
 ```
 
-Not every setup sends D (50): check what actually arrives with `aseqdump -l` and `aseqdump -p <port>`, or
-click **Detect** next to the beat note in Configuration > Clock and let the first note fill in note, velocity and
-channel. The output must reach an ALSA port the renderer can read: Mixxx sending to a "Virtual Raw MIDI" port
-does not (that port only carries what other programs write to the raw device), but "Midi Through" does, so pick it
-as Mixxx's output device and as the port here.
+If the beat does not arrive, check what is sent with `aseqdump -l` / `aseqdump -p <port>`, or click **Detect** next to
+the beat note in Configuration > Clock: the first note that arrives fills in note, velocity and channel.
+
+**VirMIDI.** If Mixxx's output device is a "VirMIDI" port (Mixxx offers nothing else on some systems), what it
+sends appears only on the matching *raw* device, which a sequencer client cannot subscribe to. Pick the entry
+with "(raw hw:1,0)" in its name, e.g. "VirMIDI 1-0 (raw hw:1,0)": the renderer then reads `/dev/snd/midiC1D0`
+itself (you need read access to it, which the desktop session normally grants).
 
 The beats set the speed and phase. A beat note does not say which beat starts a bar, so press **Downbeat** (key D,
 or `mirrorballs-ctl sync`) on the first beat of a bar. Test without Mixxx: `uv run python tools/midi_clock.py --bpm 100 --beat-notes`.

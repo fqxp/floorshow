@@ -16,6 +16,8 @@ from typing import Any
 
 import rtmidi
 
+from ..common.rawmidi import RawMidiReader, list_raw_ports
+
 log = logging.getLogger("mirrorballs.midi")
 POLL_S = 1.0
 
@@ -25,7 +27,7 @@ class MidiManager:
         self.inbox = inbox
         self.time_fn = time_fn
         self._wanted: dict[str, set[str]] = {}  # port substring (lowercase) -> roles
-        self._open: dict[str, tuple[rtmidi.MidiIn, str]] = {}  # substring -> (input, full port name)
+        self._open: dict[str, tuple[Any, str]] = {}  # substring -> (rtmidi input or RawMidiReader, full port name)
         self._probe = rtmidi.MidiIn()
         self._next_poll = 0.0
 
@@ -44,9 +46,12 @@ class MidiManager:
             return
         self._next_poll = now + POLL_S
         names = self._probe.get_ports()
+        raw = list_raw_ports()
         for key in list(self._open):
-            if self._open[key][1] not in names:  # unplugged
-                log.info("MIDI port '%s' went away", self._open[key][1])
+            inp, name = self._open[key]
+            gone = not inp.alive if isinstance(inp, RawMidiReader) else name not in names
+            if gone or (isinstance(inp, RawMidiReader) and name not in raw):  # unplugged
+                log.info("MIDI port '%s' went away", name)
                 self._close(key)
         for key in self._wanted:
             if key in self._open:
@@ -54,6 +59,10 @@ class MidiManager:
             idx = next((i for i, n in enumerate(names) if key in n.lower()), None)
             if idx is not None:
                 self._open_port(key, idx, names[idx])
+                continue
+            raw_name = next((n for n in raw if key in n.lower()), None)
+            if raw_name is not None:
+                self._open_raw(key, raw_name, raw[raw_name])
 
     def _open_port(self, key: str, idx: int, name: str) -> None:
         try:
@@ -73,11 +82,26 @@ class MidiManager:
         except Exception as e:  # noqa: BLE001 - a bad device must not take the renderer down
             log.warning("cannot open MIDI port '%s': %s", name, e)
 
+    def _open_raw(self, key: str, name: str, path: Any) -> None:
+        def callback(msg: bytes, t: float, key: str = key) -> None:
+            roles = self._wanted.get(key)
+            if roles:
+                self.inbox.put(("midi", roles, msg, t))
+
+        try:
+            self._open[key] = (RawMidiReader(path, callback, self.time_fn), name)
+            log.info("MIDI input opened: %s (%s)", name, "+".join(sorted(self._wanted[key])))
+        except OSError as e:
+            log.warning("cannot open MIDI device '%s': %s", name, e)
+
     def _close(self, key: str) -> None:
         inp, _ = self._open.pop(key)
         try:
-            inp.cancel_callback()
-            inp.close_port()
+            if isinstance(inp, RawMidiReader):
+                inp.close()
+            else:
+                inp.cancel_callback()
+                inp.close_port()
         except Exception:  # noqa: BLE001
             pass
 
@@ -89,7 +113,7 @@ class MidiManager:
         return {"clock": role("clock"), "control": role("control")}
 
     def list_ports(self) -> list[str]:
-        return self._probe.get_ports()
+        return self._probe.get_ports() + list(list_raw_ports())
 
     def close(self) -> None:
         for key in list(self._open):
