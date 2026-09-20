@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,16 @@ TRANSITIONS = [
 ]
 LENGTHS = [("¼ bar", 0.25), ("½ bar", 0.5), ("1 bar", 1.0), ("2 bars", 2.0)]
 MAX_HOTKEYS = 8
+
+
+def bars_until_change(state: dict[str, Any] | None, elapsed_s: float = 0.0) -> int | None:
+    """Whole bars left (rounded up, at least 1) until the automatic scene change; None when there is none."""
+    nxt = state.get("next_change_beat") if state else None
+    if nxt is None:
+        return None
+    clock = state["clock"]
+    beat = clock["beat"] + elapsed_s * clock["bpm"] / 60.0
+    return max(1, math.ceil((nxt - beat) / max(1, clock["beats_per_bar"])))
 
 
 @dataclass(frozen=True)

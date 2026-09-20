@@ -553,6 +553,17 @@ class Core:
         return FrameSpec(cal=cal, incoming=incoming, outgoing=outgoing, mix=mix, transition=ttype,
                          master=master, black=black)
 
+    def next_change_beat(self, snap) -> float | None:
+        """Beat at which the director will switch scene next; None in manual mode or when it never will."""
+        if self.mode == "manual" or self.cal_owner is not None or not self.scenes:
+            return None
+        if self.mode == "sequence" and self._sequence():
+            nxt = self._seq_next
+            if nxt is None:  # the sequence starts on the next tick
+                return snap.beat
+            return None if nxt == float("inf") else nxt
+        return (int(snap.beat // self.every_beats) + 1) * float(self.every_beats)
+
     # --- state for clients ---------------------------------------------------------------
 
     def state(self, now: float) -> dict[str, Any]:
@@ -576,6 +587,7 @@ class Core:
             "running": self.running,
             "mode": self.mode,
             "every_beats": self.every_beats,
+            "next_change_beat": self.next_change_beat(snap),
             "master": self.master,
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,

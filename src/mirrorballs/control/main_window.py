@@ -222,7 +222,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.next_btn = push_button("Next", "tall", kbd_text="]", icon_name="go-next-symbolic")
         self.prev_btn.connect("clicked", lambda *_: self.act_step(-1))
         self.next_btn.connect("clicked", lambda *_: self.act_step(+1))
-        head = hbox(8, label("Scenes", "panel-title", hexpand=True), self.prev_btn, self.next_btn)
+        self.countdown = label("", "secondary", xalign=1.0)
+        self.countdown.set_tooltip_text("Bars until the next automatic scene change")
+        self._countdown_text = ""
+        head = hbox(8, label("Scenes", "panel-title", hexpand=True), self.countdown, self.prev_btn, self.next_btn)
 
         self.manual_btn = Gtk.ToggleButton(label="Manual")
         self.random_btn = Gtk.ToggleButton(label="Random")
@@ -894,9 +897,17 @@ class MainWindow(Adw.ApplicationWindow):
             idx, phase = vm.beat_in_bar(st["clock"], time.monotonic() - self.state_time)
             self.beat_tile.set_intensity(tokens.beat_intensity(phase))
             self._set_pip(idx)
+        self._update_countdown(st)
         if self.starting and time.monotonic() > self._start_deadline and not self.connected:
             self.refresh()
         return True  # keep ticking
+
+    def _update_countdown(self, st: dict[str, Any] | None) -> None:
+        bars = vm.bars_until_change(st, time.monotonic() - self.state_time) if st else None
+        text = "" if bars is None else f"Next scene in {bars} bar{'s' if bars != 1 else ''}"
+        if text != self._countdown_text:
+            self._countdown_text = text
+            self.countdown.set_text(text)
 
     def _set_pip(self, idx: int) -> None:
         if idx == self._pip_current:

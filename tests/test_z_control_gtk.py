@@ -224,6 +224,20 @@ def test_beat_indicator_switch_is_on_by_default_and_saved(win):
     assert w.store.load().ui.beat_indicator is True
 
 
+def test_countdown_shows_bars_to_the_next_automatic_change(win):
+    w, _ = win
+    w.set_connection(True)
+    w.apply_state(st(mode="manual", next_change_beat=None))
+    w._update_countdown(w.state)
+    assert w.countdown.get_text() == ""
+    w.apply_state(st(mode="random", next_change_beat=34.0))  # beat 2.0 of 4 per bar: 8 bars
+    w._update_countdown(w.state)
+    assert w.countdown.get_text() == "Next scene in 8 bars"
+    w.apply_state(st(mode="sequence", next_change_beat=6.0))
+    w._update_countdown(w.state)
+    assert w.countdown.get_text() == "Next scene in 1 bar"
+
+
 def test_blackout_remembers_brightness(win):
     w, fake = win
     w.set_connection(True)

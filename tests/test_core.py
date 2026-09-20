@@ -86,6 +86,17 @@ def test_bpm_set_retunes_the_internal_clock_and_keeps_the_beat_continuous(env):
         cmd(c, {"cmd": "bpm.set", "bpm": 5}, now=101.0)
 
 
+def test_next_change_beat_follows_the_mode(env):
+    c = make(env, "clock: {source: internal, bpm: 120, beats_per_bar: 4}\n", now=100.0)
+    assert c.state(100.0)["next_change_beat"] is None  # manual
+    cmd(c, {"cmd": "mode.set", "mode": "random", "every": {"bars": 8}})
+    assert c.state(100.0)["next_change_beat"] == 32.0
+    beat = c.clock.snapshot(116.0).beat  # 32 beats later
+    assert c.state(116.0)["next_change_beat"] == (int(beat // 32) + 1) * 32
+    cmd(c, {"cmd": "calibration.begin"}, client="cal")
+    assert c.state(100.0)["next_change_beat"] is None
+
+
 def test_next_prev_wrap(env):
     c = make(env)
     for expect in ("b", "c", "a"):

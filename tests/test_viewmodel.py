@@ -1,6 +1,6 @@
 import pytest
 
-from mirrorballs.control import tokens
+from mirrorballs.control import tokens, viewmodel as vm
 from mirrorballs.control.viewmodel import (
     LENGTHS, banners, beat_in_bar, clock_text, display_name, hotkeys, nearest_length, renderer_chip,
     scene_for_key, transition_payload,
@@ -111,3 +111,14 @@ def test_key_to_action_matches_the_shortcut_sheet():
     assert k("Up", ctrl=True) == ("brightness", 5) and k("Down", ctrl=True) == ("brightness", -5)
     assert k("comma", ctrl=True) == ("config", None) and k("question", ctrl=True) == ("shortcuts", None)
     assert k("space", ctrl=True) is None and k("x") is None  # no accidental triggers
+
+
+def test_bars_until_change_counts_down_and_rounds_up():
+    clock = dict(source="internal", bpm=120.0, beat=1.0, beats_per_bar=4)
+    state = dict(clock=clock, next_change_beat=33.0)
+    assert vm.bars_until_change(state) == 8
+    assert vm.bars_until_change(state, elapsed_s=0.5) == 8  # 1.5 beats in: 7.9 bars left
+    assert vm.bars_until_change(state, elapsed_s=14.0) == 2
+    assert vm.bars_until_change(state, elapsed_s=100.0) == 1  # never shows 0 or less
+    assert vm.bars_until_change(dict(clock=clock, next_change_beat=None)) is None
+    assert vm.bars_until_change(None) is None
