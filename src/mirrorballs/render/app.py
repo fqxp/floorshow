@@ -24,7 +24,7 @@ from .watchdog import StallWatchdog, file_dumper, install_signal_dump
 
 log = logging.getLogger("mirrorballs.render")
 STATE_HZ = 30.0
-CONTROL_TICK_S = 0.004
+CONTROL_TICK_S = 0.02  # 50 Hz: MIDI clock ticks are timestamped in the MIDI callback, so this only bounds trigger latency
 SWAP_STALL_LOG_S = 0.5
 TITLE = "Mirrorballs Output"
 
@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
                         failed_msg = str(e)
                     spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
                 frame_no += 1
-                lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0)  # 30 Hz sampling still sees 15 Hz flashing
+                lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0, deferred=True)  # 30 Hz sampling still sees 15 Hz flashing
                 if lum is not None:
                     with lock:
                         core.observe_luminance(now, lum)

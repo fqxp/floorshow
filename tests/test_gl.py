@@ -185,6 +185,21 @@ def test_mean_luminance_of_the_ball_is_measured_from_the_scene_before_master(gl)
     assert draw(pipe, black, dest, measure=True) is None
 
 
+def test_deferred_measurement_returns_the_previous_frames_value_without_waiting(gl):
+    from mirrorballs.render.frame import FrameSpec, SlotSpec, draw
+
+    pipe, dest = gl
+    white = SlotSpec([shape(color=(1.0, 1.0, 1.0))])
+    black_scene = SlotSpec([shape(color=(0.0, 0.0, 0.0))])
+    frame = lambda slot: draw(pipe, FrameSpec(cal=CAL, incoming=slot), dest, measure=True, deferred=True)
+    pipe.forget_deferred(1)
+    assert frame(white) is None  # nothing requested before
+    assert frame(black_scene) == pytest.approx(1.0, abs=0.02)  # the white frame's value
+    assert frame(black_scene) == pytest.approx(0.0, abs=0.02)  # the black one
+    pipe.forget_deferred(1)
+    assert frame(white) is None  # a gap discards the old request
+
+
 @pytest.mark.parametrize("size", [(320, 180), (1280, 720), (1920, 1080), (1000, 777)])
 def test_measured_luminance_is_exact_at_any_frame_size(gl, size):
     """Regression: a mip-chain average was 0.76 (1280x720) or 3.2x too high (1920x1080) because

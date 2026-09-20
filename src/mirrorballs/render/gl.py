@@ -96,6 +96,10 @@ class GlPipeline:
         self._measure_prog = ctx.program(vertex_shader=vert, fragment_shader=(SHADERS / "measure.frag").read_text())
         self._measure_vao = ctx.vertex_array(self._measure_prog, [(quad, "2f", "in_position")])
         self._measure_fbo = ctx.framebuffer(color_attachments=[ctx.texture((MEASURE_GRID, MEASURE_GRID), 4)])
+        # Deferred readbacks: two small pixel buffers per scene slot, written by the GPU without stalling the CPU.
+        self._readback = [[ctx.buffer(reserve=MEASURE_GRID * MEASURE_GRID * 4) for _ in range(2)] for _ in range(2)]
+        self._readback_next = [0, 0]
+        self._readback_pending: list[int | None] = [None, None]  # buffer index holding the previous request
         self._dummy_tex = ctx.texture_array((1, 1, 1), 3, bytes(3))
         self._tex_cache: dict[tuple, moderngl.TextureArray] = {}
         self.size = (0, 0)
@@ -205,11 +209,15 @@ class GlPipeline:
         p["u_rows"].value = (mode, ov.rows[1], ov.rows[2], ZEBRA_LIMIT_DEG) if ov.rows else (0.0, 4.0, 0.0, ZEBRA_LIMIT_DEG)
         self.comp_vao.render(moderngl.TRIANGLE_STRIP)
 
-    def mean_rgb(self, slot: int) -> tuple[float, float, float]:
+    def mean_rgb(self, slot: int, deferred: bool = False) -> tuple[float, float, float] | None:
         """Average colour (0..1) of a scene target over the whole frame.
 
         A small reduction pass (16 x 16 cells, 16 x 16 taps each) is read back instead of the frame.
-        A mip chain would be cheaper but is not a true average for non power-of-two sizes such as 1920 x 1080."""
+        A mip chain would be cheaper but is not a true average for non power-of-two sizes such as 1920 x 1080.
+
+        Immediately by default. With ``deferred`` the GPU writes the result into a pixel buffer and the call
+        returns the one requested by the previous call for this slot (None if there was none), so the CPU
+        never waits for the GPU: a synchronous readback costs a few ms of stall per frame."""
         tex = self.targets[slot][0]
         self._measure_fbo.use()
         self.ctx.viewport = (0, 0, MEASURE_GRID, MEASURE_GRID)
@@ -218,7 +226,22 @@ class GlPipeline:
         self._measure_prog["u_taps"].value = MEASURE_TAPS
         self._measure_prog["u_grid"].value = float(MEASURE_GRID)
         self._measure_vao.render(moderngl.TRIANGLE_STRIP)
-        px = np.frombuffer(self._measure_fbo.read(components=3), dtype=np.uint8).reshape(-1, 3).mean(axis=0) / 255.0
+        if not deferred:
+            return self._mean(self._measure_fbo.read(components=4))
+        previous = self._readback_pending[slot]
+        idx = self._readback_next[slot]
+        self._measure_fbo.read_into(self._readback[slot][idx], components=4)  # RGBA: RGB needs a converting, blocking read
+        self._readback_pending[slot] = idx
+        self._readback_next[slot] = 1 - idx
+        return None if previous is None else self._mean(self._readback[slot][previous].read())
+
+    def forget_deferred(self, slot: int) -> None:
+        """The slot was not measured this frame: its pending request is too old to use."""
+        self._readback_pending[slot] = None
+
+    @staticmethod
+    def _mean(raw: bytes) -> tuple[float, float, float]:
+        px = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 4)[:, :3].mean(axis=0) / 255.0
         return float(px[0]), float(px[1]), float(px[2])
 
     def read_rgb(self, fbo: moderngl.Framebuffer) -> np.ndarray:
