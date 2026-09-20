@@ -115,11 +115,6 @@ class Bindings(_Base):
     keys: dict[str, str] = {}  # controller-side keyboard: key -> scene id or action
 
 
-class SafetyConfig(_Base):
-    flash_limit: bool = True  # dim the output when it flashes more often than allowed (photosensitivity)
-    max_flashes_per_s: float = Field(3.0, ge=0.5, le=10)
-
-
 class UiConfig(_Base):
     beat_indicator: bool = True  # the beat tile and bar pips in the controller
 
@@ -132,7 +127,7 @@ class Config(_Base):
     director: DirectorConfig = DirectorConfig()
     midi: MidiConfig = MidiConfig()
     bindings: Bindings = Bindings()
-    safety: SafetyConfig = SafetyConfig()
+    safety: dict | None = None  # the flash limiter was removed; old files that still have this section keep loading
     ui: UiConfig = UiConfig()
 
 

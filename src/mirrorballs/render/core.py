@@ -18,7 +18,6 @@ from ..common.clock import Clock
 from ..common.config import TRANSITION_TYPES, CalibrationConfig, Config, ConfigError, load_config
 from ..common.geometry import Calibration
 from ..common.scene import Scene, SceneError, load_library, make_env
-from .flashguard import FlashGuard
 from .frame import FrameSpec, SlotSpec
 from .gl import Overlay
 
@@ -59,7 +58,6 @@ class Core:
         self.rng = rng or random.Random()
         self.fps = 0.0
         self.quit_requested = False
-        self.guard = FlashGuard()
         self.midi_status: dict[str, Any] = {}  # filled by the app: which ports are open
         self.window: dict[str, Any] | None = None  # filled by the app: size / fullscreen / monitor of the output window
         self.frame_heartbeat: float | None = None  # set by the render thread after every presented frame
@@ -157,8 +155,6 @@ class Core:
             self.every_beats = self.config.director.every.in_beats(self.config.clock.beats_per_bar)
             self._last_slot = None
         self._apply_clock_config(now)
-        s = self.config.safety
-        self.guard.configure(s.max_flashes_per_s, s.flash_limit)
         self.midi_dirty = True
 
     def _first_scene(self) -> str | None:
@@ -175,10 +171,6 @@ class Core:
             else:
                 self.clock.use_internal(c.bpm, now)
         self._applied_clock = c
-
-    def observe_luminance(self, now: float, luminance: float) -> None:
-        """Feed the flash guard (render thread, under the core lock)."""
-        self.guard.update(now, luminance)
 
     def output_state(self, now: float) -> dict[str, Any]:
         """Is the output window actually being presented? The render loop blocks in swap_buffers while GNOME
@@ -534,7 +526,7 @@ class Core:
         step = (now - self._level_time) / FADE_S
         self._level_time = now
         self._level = min(target, self._level + step) if target > self._level else max(target, self._level - step)
-        master = self.master * self._level * self.guard.gain  # the flash guard dims only while it is limiting
+        master = self.master * self._level
 
         if self.current is None or self.current not in self.scenes:
             return FrameSpec(cal=cal, incoming=None, master=master, black=True)
@@ -601,7 +593,6 @@ class Core:
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
             "test_pattern": self.test_pattern,
-            "flash": {"enabled": self.guard.enabled, "limited": self.guard.limited, "max_per_s": self.guard.max_flashes_per_s},
             "learning": self.learn,
             "sequence_index": self._seq_index if self.mode == "sequence" else None,
             "window": self.window,

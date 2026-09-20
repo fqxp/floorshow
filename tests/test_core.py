@@ -401,20 +401,6 @@ def test_sequence_restarts_the_item_when_the_beat_counter_jumps_back(env):
     assert c.current == "a" and c._seq_next is not None and c._seq_next <= 9.0  # 2 bars from ~0, not from the old position
 
 
-def test_flash_guard_dims_the_output_and_reports_it(env):
-    c = make(env, "safety: {flash_limit: true, max_flashes_per_s: 3}\n")
-    assert c.state(100.0)["flash"] == {"enabled": True, "limited": False, "max_per_s": 3.0}
-    t = 100.0
-    for k in range(180):  # 8 Hz full-frame flashing, fed the way the render thread does
-        t = 100.0 + k / 60
-        c.observe_luminance(t, 1.0 if int(t * 16) % 2 == 0 else 0.0)
-    assert c.state(t)["flash"]["limited"] and c.frame(t).master < 0.3
-    # a config reload can switch it off
-    (env[1]).write_text("safety: {flash_limit: false}\n")
-    c.poll_files(t + 1.0)
-    assert not c.state(t)["flash"]["enabled"] and c.frame(t + 1.0).master == 1.0
-
-
 def test_calibration_preview_carries_crosshair_rows_and_line_visibility(env):
     c = make(env)
     cmd(c, {"cmd": "calibration.begin"}, client="ctl")

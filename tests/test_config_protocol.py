@@ -125,3 +125,9 @@ def test_reply_helpers():
     assert ok(3, x=1) == {"id": 3, "ok": True, "x": 1}
     assert error(3, "boom") == {"id": 3, "ok": False, "error": "boom"}
 
+
+
+def test_a_config_with_the_removed_safety_section_still_loads(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("safety: {flash_limit: true, max_flashes_per_s: 3}\nclock: {bpm: 100}\n")
+    assert load_config(p).clock.bpm == 100

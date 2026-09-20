@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             pipe = GlPipeline(ctx)
             log.info("GL: %s | %s", ctx.info["GL_RENDERER"], ctx.info["GL_VERSION"])
             log.info("renderer ready: %d scene(s), socket %s", len(core.scenes), ipc.path)
-            last, failed_msg, frame_no = time.monotonic(), "", 0
+            last, failed_msg = time.monotonic(), ""
             while not stop.is_set():
                 now = time.monotonic()
                 fw, fh = fb["size"]
@@ -211,11 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                         log.exception("frame evaluation failed")
                         failed_msg = str(e)
                     spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
-                frame_no += 1
-                lum = draw(pipe, spec, ctx.screen, measure=frame_no % 2 == 0, deferred=True)  # 30 Hz sampling still sees 15 Hz flashing
-                if lum is not None:
-                    with lock:
-                        core.observe_luminance(now, lum)
+                draw(pipe, spec, ctx.screen)
                 swap_start = time.monotonic()
                 glfw.swap_buffers(window)
                 swapped = time.monotonic()
