@@ -118,7 +118,7 @@ def test_bars_until_change_counts_down_and_rounds_up():
     state = dict(clock=clock, next_change_beat=33.0)
     assert vm.bars_until_change(state) == 8
     assert vm.bars_until_change(state, elapsed_s=0.5) == 8  # 1.5 beats in: 7.9 bars left
-    assert vm.bars_until_change(state, elapsed_s=14.0) == 2
+    assert vm.bars_until_change(state, elapsed_s=10.0) == 3
     assert vm.bars_until_change(state, elapsed_s=100.0) == 1  # never shows 0 or less
     assert vm.bars_until_change(dict(clock=clock, next_change_beat=None)) is None
     assert vm.bars_until_change(None) is None
