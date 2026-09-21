@@ -770,7 +770,7 @@ def test_axis_step_drives_the_renderer_overlay_and_saves_roll_and_tilt(cfgwin):
     assert saved.ball.row_pitch_deg is None  # step 3 was never visited
 
 
-def test_axis_numeric_fallback_and_skip(cfgwin):
+def test_axis_numeric_fallback_and_reset(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
@@ -778,11 +778,14 @@ def test_axis_numeric_fallback_and_skip(cfgwin):
     cal.height_step.set_value(35, notify=True)
     cal.distance_step.set_value(2.4, notify=True)
     assert last_preview(fake)["tilt_deg"] == pytest.approx(8.3, abs=0.05)
-    cal._go(3, apply_axis=False)  # Skip: the angles are not applied
-    assert cal.session.cal.tilt_deg == 0.0 and last_preview(fake)["tilt_deg"] == 0.0
+    cal._go(3)  # Next applies the angles
+    assert cal.session.cal.tilt_deg == pytest.approx(8.3, abs=0.05)
     cal._go(2)
-    cal._go(3)  # Next: they are
-    assert cal.session.cal.tilt_deg == 0.0  # the skipped values were discarded with the old axis session
+    cal._do_reset(2)  # the page's own Reset to defaults: upright again
+    assert last_preview(fake)["tilt_deg"] == 0.0 and cal.above_seg.selected() == "above"
+    assert not cal.axis.dirty and cal.height_step.value == 0
+    cal._go(3)
+    assert cal.session.cal.tilt_deg == 0.0
 
 
 def test_rows_step_previews_stripes_and_saves_only_what_was_changed(cfgwin):
@@ -851,24 +854,43 @@ def test_every_step_leads_to_the_confirmation_screen(cfgwin):
     assert load_config(tmp / "config.yaml").calibration is not None
 
 
-def test_skipping_the_rows_step_leaves_them_unsaved(cfgwin):
+def test_every_editing_page_has_a_reset_and_none_has_a_skip(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
-    cal._rows_act("offset", +1)
-    cal._go(4, apply_rows=False)  # Skip: what was nudged here is dropped
-    assert cal.rows_skipped and cal.done_rows.get_text() == "Not set"
-    cal.finish()
-    assert load_config(tmp / "config.yaml").ball.row_pitch_deg is None
+    for step in (1, 2, 3, 4):
+        if step != 1:
+            cal._go(step)
+        labels = texts(cal.footers.get_child_by_name(str(step)))
+        assert "Skip" not in labels
+        assert ("Reset to defaults" in labels) is (step in (1, 2, 3))
+    cal._go(1)
+    cal._act("line", ("top", +1))
+    cal._do_reset(1)
+    assert not cal.session.dirty and cal.read_size.get_text() == "756 × 756 px"
+
+
+def test_resetting_the_rows_step_switches_snapping_off_again(cfgwin):
+    w, fake, tmp = cfgwin
+    (tmp / "config.yaml").write_text("ball: {row_pitch_deg: 3.8, row_offset_deg: 1.0}\n")
     w.open_calibration()
     cal = w.calibration_window
     cal._go(3)
     cal._rows_act("offset", +1)
-    cal._go(4)  # Next: they are kept
-    assert not cal.rows_skipped and cal.done_rows.get_text().startswith("rows")
+    cal._go(4)
+    assert cal.done_rows.get_text().startswith("rows")
     cal.finish()
-    assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(0.2)
+    assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(1.2)
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._go(3)
+    cal._do_reset(3)
+    assert cal.rows_cleared and cal.rows.pitch == 4.0 and cal.rows.offset == 0.0
+    cal._go(4)
+    assert cal.done_rows.get_text() == "Not set"
+    cal.finish()
+    b = load_config(tmp / "config.yaml").ball
+    assert b.row_pitch_deg is None and b.row_offset_deg == 0.0
 
 
 def test_step_keys_reach_the_right_handlers(cfgwin):

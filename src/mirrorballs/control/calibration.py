@@ -184,7 +184,7 @@ class CalibrationWindow(Adw.Window):
         self.rows: RowsSession | None = None
         self.step_no = 1
         self.start_step = start_step
-        self.rows_skipped = False  # step 3 left with Skip: the row grid is not saved
+        self.rows_cleared = False  # step 3 was reset to defaults: the saved row grid is dropped
         self.begun = False
         self._begin_deadline = 0.0
         self._closing = False
@@ -282,9 +282,6 @@ class CalibrationWindow(Adw.Window):
         )
         body = hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
 
-        self.reset_btn = push_button("Reset to defaults", "tall")
-        self.reset_btn.connect("clicked", lambda *_: self._on_reset())
-
         self.pages = Gtk.Stack(vexpand=True)
         self.pages.add_named(body, "1")
         self.pages.add_named(self._build_axis_page(), "2")
@@ -301,28 +298,31 @@ class CalibrationWindow(Adw.Window):
             b.connect("clicked", lambda *_: self._go(to))
             return b
 
-        def next_btn(to: int, **go: Any) -> Gtk.Button:
+        def next_btn(to: int) -> Gtk.Button:
             b = push_button("Next", "tall", "primary", kbd_text="Enter")
             b.add_css_class("on-accent")
-            b.connect("clicked", lambda *_: self._go(to, **go))
+            b.connect("clicked", lambda *_: self._go(to))
             return b
 
-        def skip_btn(to: int, **go: Any) -> Gtk.Button:
-            b = push_button("Skip", "tall")
-            b.connect("clicked", lambda *_: self._go(to, **go))
+        def reset_btn(step: int) -> Gtk.Button:
+            # No keyboard shortcut, on any page: it undoes work and is too easy to hit by accident.
+            b = push_button("Reset to defaults", "tall")
+            b.connect("clicked", lambda *_: self._on_reset(step))
             return b
 
         # Every step but the last ends in Next, so the wizard always runs to the confirmation screen.
         self.next1_btn, self.next_btn, self.next3_btn = next_btn(2), next_btn(3), next_btn(4)
+        self.reset_btns = {step: reset_btn(step) for step in (1, 2, 3)}
+        self.reset_btn = self.reset_btns[1]
         self.finish_btn = push_button("Finish", "tall", "primary", kbd_text="Enter")
         self.finish_btn.add_css_class("on-accent")
         self.finish_btn.connect("clicked", lambda *_: self.finish())
         self.footers = Gtk.Stack()
         pad = dict(margin_start=24, margin_end=24, margin_top=8, margin_bottom=16)
-        self.footers.add_named(hbox(8, self.reset_btn, Gtk.Box(hexpand=True), cancel_btn(), self.next1_btn, **pad), "1")
-        self.footers.add_named(hbox(8, back_btn(1), Gtk.Box(hexpand=True), cancel_btn(), skip_btn(3, apply_axis=False),
+        self.footers.add_named(hbox(8, self.reset_btns[1], Gtk.Box(hexpand=True), cancel_btn(), self.next1_btn, **pad), "1")
+        self.footers.add_named(hbox(8, back_btn(1), self.reset_btns[2], Gtk.Box(hexpand=True), cancel_btn(),
                                     self.next_btn, **pad), "2")
-        self.footers.add_named(hbox(8, back_btn(2), Gtk.Box(hexpand=True), cancel_btn(), skip_btn(4, apply_rows=False),
+        self.footers.add_named(hbox(8, back_btn(2), self.reset_btns[3], Gtk.Box(hexpand=True), cancel_btn(),
                                     self.next3_btn, **pad), "3")
         self.footers.add_named(hbox(8, back_btn(3), Gtk.Box(hexpand=True), cancel_btn(), self.finish_btn, **pad), "4")
         view.set_content(vbox(8, self.instruction, self.pages, self.footers, margin_top=8))
@@ -488,15 +488,13 @@ class CalibrationWindow(Adw.Window):
         4: "A turning globe is projected onto the ball. Check that it hugs the edges, then finish.",
     }
 
-    def _go(self, step: int, apply_axis: bool = True, apply_rows: bool = True) -> None:
-        """Switch step. Leaving step 2 or 3 applies what was adjusted there, unless it was skipped."""
+    def _go(self, step: int) -> None:
+        """Switch step. Leaving step 2 writes the crosshair's roll and tilt into the calibration."""
         s = self.session
         if s is None or step == self.step_no:
             return
-        if self.step_no == 2 and self.axis and apply_axis:
+        if self.step_no == 2 and self.axis:
             s.cal = self.axis.calibration()
-        if self.step_no == 3:
-            self.rows_skipped = not apply_rows
         if step == 2:  # rebuilt on every entry: the lines may have changed since the last visit
             self.axis = AxisSession(s.cal, s.width, s.height, step=s.step)
             self.axis_step.select(s.step)
@@ -546,6 +544,8 @@ class CalibrationWindow(Adw.Window):
         if not self.rows:
             return
         self.rows.apply(action, arg)
+        if action in ("offset", "pitch"):
+            self.rows_cleared = False  # nudged again after a reset: it is a real row grid once more
         if action == "step":
             self.rows_step.select(arg)
         self._send_preview()
@@ -622,8 +622,8 @@ class CalibrationWindow(Adw.Window):
         for i, pill in enumerate(self.step_pills, start=1):
             set_classes(pill.get_first_child(), {"current": i == self.step_no})
         active = s is not None and self.main.connected
-        for w in (self.finish_btn, self.next1_btn, self.next_btn, self.next3_btn, self.reset_btn, self.blink_btn,
-                  self.grid_btn, self.step_seg):
+        for w in (self.finish_btn, self.next1_btn, self.next_btn, self.next3_btn, *self.reset_btns.values(),
+                  self.blink_btn, self.grid_btn, self.step_seg):
             w.set_sensitive(active)
         dark = Adw.StyleManager.get_default().get_dark()
         self.diagram.dark = self.axis_diagram.dark = self.rows_diagram.dark = self.done_diagram.dark = dark
@@ -665,28 +665,51 @@ class CalibrationWindow(Adw.Window):
         if self.step_no == 4:
             self.done_silhouette.set_text(f"{fmt_px(sw)} × {fmt_px(sh)} px at {fmt_px(cx)}, {fmt_px(cy)}")
             self.done_axis.set_text(" · ".join(self.axis.texts()) if self.axis and self.axis.dirty else "Not set")
-            self.done_rows.set_text(self.rows.text() if self.rows and self.rows.dirty and not self.rows_skipped else "Not set")
+            self.done_rows.set_text("Not set" if self.rows_cleared or not (self.rows and self.rows.dirty) else self.rows.text())
             self.done_diagram.roll, self.done_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.done_diagram.queue_draw()
 
-    def _on_reset(self) -> None:
+    RESET_BODY = {
+        1: "The lines go back to a centred, round ball at 70 % of the screen height.",
+        2: "The ball's axis goes back to upright, with the projector level with the equator.",
+        3: f"The row grid goes back to {DEFAULT_PITCH:g}° per row, and scenes stop snapping to rows.",
+    }
+
+    def _step_dirty(self, step: int) -> bool:
+        return bool({1: self.session and self.session.dirty, 2: self.axis and self.axis.dirty,
+                     3: self.rows and self.rows.dirty}.get(step))
+
+    def _on_reset(self, step: int) -> None:
+        """Each page resets only what it sets. Asked for only when there is something to lose."""
         if not self.session:
             return
-        if not self.session.dirty:
-            self._do_reset()
+        if not self._step_dirty(step):
+            self._do_reset(step)
             return
-        dlg = Adw.AlertDialog(heading="Reset to defaults?", body="The lines go back to a centred, round ball at 70 % of the screen height.")
+        dlg = Adw.AlertDialog(heading="Reset to defaults?", body=self.RESET_BODY[step])
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("reset", "Reset to defaults")
         dlg.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
-        dlg.connect("response", lambda _d, r: r == "reset" and self._do_reset())
+        dlg.connect("response", lambda _d, r: r == "reset" and self._do_reset(step))
         dlg.present(self)
 
-    def _do_reset(self) -> None:
-        if self.session:
-            self.session.reset(self._default_calibration())
-            self._send_preview()
-            self._update()
+    def _do_reset(self, step: int) -> None:
+        s = self.session
+        if s is None:
+            return
+        if step == 1:
+            s.reset(self._default_calibration())
+        elif step == 2:
+            s.cal = replace(s.cal, roll_deg=0.0, tilt_deg=0.0)
+            self.axis = AxisSession(s.cal, s.width, s.height, step=s.step)
+            self.above_seg.select("above")
+        else:
+            # Back to "never calibrated": the default pitch with snapping off, which finish() stores as null.
+            self.rows = RowsSession(DEFAULT_PITCH, 0.0, step=self.rows.step if self.rows else "normal",
+                                    mode=self.rows.mode if self.rows else "zebra")
+            self.rows_cleared = True
+        self._send_preview()
+        self._update()
 
     def finish(self) -> None:
         if not self.session or not self.main.connected:
@@ -700,8 +723,9 @@ class CalibrationWindow(Adw.Window):
         data = CalibrationConfig.from_calibration(c).model_dump()
         data["calibrated_at"] = datetime.now().isoformat(timespec="minutes")
         updates: dict[str, Any] = {"calibration": data}
-        # untouched or skipped rows are not saved: an arbitrary default pitch would switch snapping on
-        if self.rows and self.rows.dirty and not self.rows_skipped:
+        if self.rows_cleared:  # step 3 was reset: snapping goes off again
+            updates["ball"] = {"row_pitch_deg": None, "row_offset_deg": 0.0}
+        elif self.rows and self.rows.dirty:  # untouched rows are not saved: a default pitch would switch snapping on
             updates["ball"] = {"row_pitch_deg": round(self.rows.pitch, 4), "row_offset_deg": round(self.rows.offset, 4)}
         try:
             self.main.store.update(updates)

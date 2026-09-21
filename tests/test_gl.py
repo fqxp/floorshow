@@ -149,8 +149,9 @@ def test_transitions_master_and_lines(gl):
     assert grid[..., 1].max() > 100 and grid[2, 2].tolist() == [0, 0, 0]
     # the confirmation step turns the grid: the meridians move, the latitude rings and the rim stay put
     turned = comp(overlay=Overlay(grid=True, spin_deg=15.0))
-    assert not np.array_equal(grid[..., 2], turned[..., 2])   # meridians moved (blue)
-    assert np.array_equal(grid[..., 0], turned[..., 0])       # equator and rim did not (red)
+    # compared as lit/unlit, since antialiasing can differ by one step where lines cross
+    assert not np.array_equal(grid[..., 2] > 128, turned[..., 2] > 128)  # meridians moved (blue)
+    assert np.array_equal(grid[..., 0] > 128, turned[..., 0] > 128)      # equator and rim did not (red)
     assert turned[2, 2].tolist() == [0, 0, 0]
 
 
