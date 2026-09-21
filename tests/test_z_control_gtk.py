@@ -19,8 +19,8 @@ except (ValueError, ImportError):  # pragma: no cover
 if not Gtk.init_check() or Gdk.Display.get_default() is None:  # pragma: no cover
     pytest.skip("no display", allow_module_level=True)
 
-from mirrorballs.common.config import SequenceItem
 from mirrorballs.control import tokens, viewmodel as vm
+from mirrorballs.common.config import load_config
 from mirrorballs.control.client import RendererClient
 from mirrorballs.control.library import Library
 from mirrorballs.control.main_window import MainWindow
@@ -179,14 +179,12 @@ def test_every_stepper_works_in_sequence_mode_and_survives_state_updates(win):
     assert w.every_bars == 9
 
 
-def test_every_stepper_is_off_when_a_sequence_sets_its_own_lengths(win):
+def test_the_every_stepper_is_remembered_for_the_next_start(win, tmp_path):
     w, _ = win
     w.set_connection(True)
-    w.apply_state(st(mode="sequence"))
-    assert w.every_label.get_parent().get_sensitive()
-    w.cfg.director.sequence = [SequenceItem(scene="alpha", bars=4)]
-    w.refresh()
-    assert not w.every_label.get_parent().get_sensitive()
+    w.apply_state(st(mode="random"))
+    w._set_every(12)
+    assert load_config(tmp_path / "config.yaml").director.every.bars == 12
 
 
 def test_window_and_column_sizes_do_not_depend_on_the_scene(win):
@@ -433,7 +431,6 @@ def test_client_talks_to_a_live_renderer(app, tmp_path):
 # --- configuration dialog and calibration window ---------------------------------------------
 
 from mirrorballs.common import paths  # noqa: E402
-from mirrorballs.common.config import load_config  # noqa: E402
 from mirrorballs.control.config_dialog import TABS  # noqa: E402
 
 
@@ -534,20 +531,6 @@ def test_the_port_list_starts_on_a_placeholder_while_no_port_is_saved(cfgwin):
     assert load_config(w.store.path).clock.midi_port == "Mixxx 130:0"
 
 
-def test_output_tab_shows_window_state_and_toggles_the_test_pattern(cfgwin):
-    w, fake, _ = cfgwin
-    w.open_config()
-    d = w.config_dialog
-    assert "HDMI-A-1 · 1920 × 1080" in d.window_sub.get_text()
-    assert "Fullscreen" in texts(d.window_chip_box)
-    w.apply_state(st(window=dict(width=1280, height=720, fullscreen=False, monitor=None)))
-    assert "Windowed" in texts(d.window_chip_box)
-    d._toggle_test_pattern()
-    assert fake.sent[-1] == ("testpattern.set", {"on": True})
-    w.apply_state(st(test_pattern=True))
-    assert "Hide test pattern" in texts(d.test_btn)
-
-
 def test_midi_mapping_learn_flow(cfgwin):
     w, fake, tmp = cfgwin
     w.open_config()
@@ -565,24 +548,19 @@ def test_midi_mapping_learn_flow(cfgwin):
     assert load_config(tmp / "config.yaml").midi.map == []
 
 
-def test_director_and_ball_pages(cfgwin):
+def test_ball_page(cfgwin):
     w, fake, tmp = cfgwin
     w.open_config()
     d = w.config_dialog
-    d.every.set_value(4, notify=True)
-    d.no_repeat.set_active(False)
-    d._seq_add()
-    d._seq_set(0, scene="beta", bars=2)
     d.d_step.set_value(40, notify=True)  # diameter 40 cm with 10 mm tiles
     d._flush()
     cfg = load_config(tmp / "config.yaml")
-    assert cfg.director.every.bars == 4 and cfg.director.no_repeat is False
-    assert [(s.scene, s.bars) for s in cfg.director.sequence] == [("beta", 2)]
     assert cfg.ball.diameter_cm == 40 and cfg.ball.row_pitch_deg == pytest.approx(180 / (3.14159265 * 400 / 20), rel=0.02)
     assert d.rows_step.value == 63  # rows follow the diameter (pi * 400 / 20)
     d.rows_step.set_value(50, notify=True)  # and the tile size follows the rows
     assert d.tile_step.value == round(3.14159265 * 400 / 100)
-    assert "Calibration" not in TABS  # calibration has its own dialog: it is redone at every rig setup
+    # calibration has its own dialog, and the window is positioned with GNOME, so neither is a tab
+    assert TABS == ["Scenes", "Clock", "MIDI", "Ball"]
 
 
 def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):

@@ -74,11 +74,6 @@ class Every(_Base):
         return self.beats if self.beats is not None else (self.bars or 8) * beats_per_bar
 
 
-class Pool(_Base):
-    tags: list[str] = []
-    ids: list[str] = []
-
-
 TRANSITION_TYPES = ("crossfade", "cut", "wipe_lat", "iris", "flash")  # what "random" picks from
 
 
@@ -87,19 +82,16 @@ class TransitionConfig(_Base):
     beats: float = Field(1.0, ge=0)
 
 
-class SequenceItem(_Base):
-    scene: str
-    bars: int = Field(8, ge=1, le=64)
-
-
 class DirectorConfig(_Base):
-    mode: Literal["manual", "random", "sequence"] = "manual"
+    mode: Literal["manual", "random", "sequence"] = "manual"  # the mode the renderer starts in
     every: Every = Every(bars=8)
-    no_repeat: bool = True
-    pool: Pool = Pool()
-    sequence: list[SequenceItem] = []  # empty: sequence mode walks the scenes alphabetically every `every`
-    loop: bool = True
     transition: TransitionConfig = TransitionConfig()
+    # Scene pools, no-repeat and hand-written sequences were removed; old files that still have
+    # these keys keep loading. Random never repeats the current scene, Sequence walks all scenes.
+    no_repeat: Any | None = None
+    pool: Any | None = None
+    sequence: Any | None = None
+    loop: Any | None = None
 
 
 class MidiTrigger(_Base):

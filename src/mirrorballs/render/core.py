@@ -89,9 +89,6 @@ class Core:
         self.mode = "manual"
         self.every_beats = 32
         self._last_slot: int | None = None
-        self._seq_index = 0
-        self._seq_next: float | None = None  # beat at which the sequence advances; None = start on the next tick
-        self._seq_start = 0.0
 
         # calibration mode
         self.cal_owner: Any = None
@@ -225,50 +222,14 @@ class Core:
         if self._transition is None:
             self.previous = None
 
-    def _sequence(self) -> list:
-        return [i for i in self.config.director.sequence if i.scene in self.scenes]
-
-    def _sequence_step(self, snap, now: float) -> None:
-        """Play the configured sequence: each item for its own number of bars, optionally looping."""
-        items = self._sequence()
-        bpb = snap.beats_per_bar
-        if self._seq_next is None or self._seq_index >= len(items):
-            self._seq_index = 0
-            self.set_scene(items[0].scene, now)
-            self._seq_start, self._seq_next = snap.beat, snap.beat + items[0].bars * bpb
-            return
-        if snap.beat < self._seq_start:  # the beat counter jumped back (MIDI Start): restart the current item
-            self._seq_start, self._seq_next = snap.beat, snap.beat + items[self._seq_index].bars * bpb
-            return
-        if snap.beat < self._seq_next:
-            return
-        last = self._seq_index == len(items) - 1
-        if last and not self.config.director.loop:
-            self._seq_next = float("inf")  # stay on the last scene
-            return
-        self._seq_index = (self._seq_index + 1) % len(items)
-        item = items[self._seq_index]
-        self.set_scene(item.scene, now)
-        self._seq_start, self._seq_next = snap.beat, snap.beat + item.bars * bpb
-
     def _step(self, delta: int, now: float) -> None:
         ids = self.scene_ids()
         if ids:
             i = ids.index(self.current) if self.current in ids else -1
             self.set_scene(ids[(i + delta) % len(ids)], now)
 
-    def _pool(self) -> list[str]:
-        pool = self.config.director.pool
-        ids = self.scene_ids()
-        if pool.ids or pool.tags:
-            ids = [i for i in ids if i in pool.ids or set(self.scenes[i].tags) & set(pool.tags)]
-        return ids
-
     def _director_step(self, snap, now: float) -> None:
         if self.mode == "manual" or self.cal_owner is not None:
-            return
-        if self.mode == "sequence" and self._sequence():
-            self._sequence_step(snap, now)
             return
         slot = int(snap.beat // self.every_beats)
         if self._last_slot is None:
@@ -277,13 +238,13 @@ class Core:
         if slot == self._last_slot:
             return
         self._last_slot = slot
-        pool = self._pool()
-        if not pool:
+        ids = self.scene_ids()
+        if not ids:
             return
         if self.mode == "sequence":
-            nxt = next((p for p in pool if p > (self.current or "")), pool[0])
-        else:
-            choices = [p for p in pool if p != self.current] if self.config.director.no_repeat and len(pool) > 1 else pool
+            nxt = next((p for p in ids if p > (self.current or "")), ids[0])
+        else:  # random never repeats the scene that is already showing
+            choices = [p for p in ids if p != self.current] or ids
             nxt = self.rng.choice(choices)
         self.set_scene(nxt, now)
 
@@ -325,7 +286,6 @@ class Core:
             if cmd.every:
                 self.every_beats = cmd.every.in_beats(self.clock.beats_per_bar)
             self._last_slot = None
-            self._seq_next = None
         elif isinstance(cmd, P.BpmSet):
             if self.clock.source == "internal":
                 self.clock.use_internal(cmd.bpm, now)  # keeps the beat continuous
@@ -576,17 +536,8 @@ class Core:
     def next_change(self, snap) -> tuple[float, float] | tuple[None, None]:
         """(beat of the director's next scene change, length in beats of the period it ends), or (None, None)
         in manual mode or when it never will."""
-        none = (None, None)
         if self.mode == "manual" or self.cal_owner is not None or not self.scenes:
-            return none
-        items = self._sequence()
-        if self.mode == "sequence" and items:
-            if self._seq_next is None or self._seq_index >= len(items):  # the sequence starts on the next tick
-                length = items[0].bars * snap.beats_per_bar
-                return snap.beat + length, float(length)
-            if self._seq_next == float("inf"):
-                return none
-            return self._seq_next, float(items[self._seq_index].bars * snap.beats_per_bar)
+            return (None, None)
         every = float(self.every_beats)
         return (int(snap.beat // every) + 1) * every, every
 
@@ -623,7 +574,6 @@ class Core:
             "calibrating": self.cal_owner is not None,
             "test_pattern": self.test_pattern,
             "learning": self.learn,
-            "sequence_index": self._seq_index if self.mode == "sequence" else None,
             "window": self.window,
             "output": self.output_state(now),
             "fps": round(self.fps, 1),

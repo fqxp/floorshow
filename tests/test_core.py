@@ -121,24 +121,17 @@ def test_params_clamped_and_validated(env):
     assert "no parameter" in cmd(c, {"cmd": "param.set", "name": "nope", "value": 1})["error"]
 
 
-def test_random_mode_switches_on_the_grid_and_respects_pool(env):
-    c = make(env, "clock: {bpm: 120, beats_per_bar: 4}\ndirector: {mode: random, every: {beats: 4}, pool: {tags: [beat]}}\n")
+def test_random_mode_switches_on_the_grid_and_never_repeats(env):
+    c = make(env, "clock: {bpm: 120, beats_per_bar: 4}\ndirector: {mode: random, every: {beats: 4}}\n")
     assert c.mode == "random" and c.every_beats == 4
-    seen = set()
-    t = 100.0
+    order, t = [], 100.0
     c.frame(t)
     for _ in range(40):
         t += 2.0  # 4 beats at 120 BPM
         c.frame(t)
-        seen.add(c.current)
-    assert seen <= {"b", "c", "a"} and {"b", "c"} <= seen
-    # after the first switch away from 'a' (not in the pool) it stays within the pool
-    later = set()
-    for _ in range(30):
-        t += 2.0
-        c.frame(t)
-        later.add(c.current)
-    assert later == {"b", "c"}
+        order.append(c.current)
+    assert set(order) == {"a", "b", "c"}  # every scene is in the pool
+    assert all(x != y for x, y in zip(order, order[1:]))  # and the one on screen is never picked again
 
 
 def test_no_switch_within_the_slot_and_manual_never_switches(env):
@@ -358,47 +351,6 @@ def test_midi_learn_reports_the_next_control_message_without_acting_on_it(env):
     assert c.take_outbox()[0]["on"] == {"program": 5, "ch": 1}
     c.on_midi({"control"}, bytes([0x90, 36, 100]), 100.0)  # learning is over: mappings work again
     assert c.current == "b"
-
-
-def test_sequence_with_per_item_bars_and_loop(env):
-    cfg = ("clock: {bpm: 120, beats_per_bar: 4}\ndirector:\n  mode: sequence\n  loop: true\n  sequence:\n"
-           "    - {scene: c, bars: 2}\n    - {scene: a, bars: 1}\n    - {scene: nope, bars: 5}\n    - {scene: b, bars: 1}\n")
-    c = make(env, cfg)
-    c.tick(100.0)
-    assert c.current == "c"  # starts with the first item (unknown scenes are skipped)
-    c.tick(103.9)  # 2 bars = 16 beats = 8 s at 120 BPM... not yet
-    assert c.current == "c"
-    c.tick(108.1)
-    assert c.current == "a"
-    c.tick(110.2)  # 1 bar = 2 s
-    assert c.current == "b"
-    c.tick(112.3)
-    assert c.current == "c"  # looped
-    c.tick(112.4)
-    assert c.current == "c" and c.state(112.4)["sequence_index"] == 0
-
-
-def test_sequence_without_loop_stays_on_the_last_scene(env):
-    cfg = "clock: {bpm: 120}\ndirector:\n  mode: sequence\n  loop: false\n  sequence:\n    - {scene: a, bars: 1}\n    - {scene: b, bars: 1}\n"
-    c = make(env, cfg)
-    c.tick(100.0)
-    c.tick(102.1)
-    assert c.current == "b"
-    for t in (104.5, 110.0, 200.0):
-        c.tick(t)
-    assert c.current == "b"
-
-
-def test_sequence_restarts_the_item_when_the_beat_counter_jumps_back(env):
-    cfg = "clock: {source: midi, midi_port: x}\ndirector:\n  mode: sequence\n  sequence:\n    - {scene: a, bars: 2}\n    - {scene: b, bars: 2}\n"
-    c = make(env, cfg)
-    for k in range(80):
-        c.on_midi({"clock"}, bytes([0xF8]), 100.0 + k * 60 / (120 * 24))
-    c.tick(101.4)
-    assert c.current == "a"
-    c.on_midi({"clock"}, bytes([0xFA]), 102.0)  # Start: beat -> 0
-    c.tick(102.05)
-    assert c.current == "a" and c._seq_next is not None and c._seq_next <= 9.0  # 2 bars from ~0, not from the old position
 
 
 def test_calibration_preview_carries_crosshair_rows_and_line_visibility(env):

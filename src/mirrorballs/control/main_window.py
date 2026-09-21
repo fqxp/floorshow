@@ -712,11 +712,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.send("mode.set", mode="random", every={"bars": self.every_bars})
         elif self.sequence_btn.get_active():
             self.send("mode.set", mode="sequence", every={"bars": self.every_bars})
-
-    def _sequence_configured(self) -> bool:
-        """A configured sequence sets its own bars per scene, so the global stepper does not apply."""
-        ids = set(self.library.ids())
-        return any(i.scene in ids for i in self.cfg.director.sequence)
+        try:  # remembered for the next start: this stepper is the only place that sets it
+            self.store.update({"director": {"every": {"bars": self.every_bars, "beats": None}}})
+            self.cfg = self.store.load()
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the setting: {e}")
 
     def _on_transition_changed(self, *_a: Any) -> None:
         if self._ui_guard:
@@ -820,10 +820,6 @@ class MainWindow(Adw.ApplicationWindow):
             for w in (self.prev_btn, self.next_btn, self.manual_btn.get_parent(), self.every_label.get_parent(),
                       self.trans_dd, self.len_dd, self.grid):
                 w.set_sensitive(live)
-            fixed_bars = self.sequence_btn.get_active() and self._sequence_configured()
-            stepper = self.every_label.get_parent()
-            stepper.set_sensitive(live and not fixed_bars)
-            stepper.set_tooltip_text("Each scene of the sequence has its own length (Configuration › Director)" if fixed_bars else None)
             set_classes(self.scenes_panel, {"disabled-area": offline and bool(self.library.ids())})
             for w in (self.controls_panel, self.master_panel):
                 set_classes(w, {"disabled-area": offline})

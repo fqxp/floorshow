@@ -23,7 +23,7 @@ from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, Stepper, hbox, icon, label, push_button, set_classes, setting_row, status_chip, vbox,
 )
 
-TABS = ["Scenes", "Clock", "Output", "MIDI", "Director", "Ball"]
+TABS = ["Scenes", "Clock", "MIDI", "Ball"]
 SAVE_DELAY_MS = 250
 
 
@@ -66,8 +66,7 @@ class ConfigDialog(Adw.Window):
         tabs.add_css_class("tabs")
         first: Gtk.ToggleButton | None = None
         self.tab_buttons: dict[str, Gtk.ToggleButton] = {}
-        builders = [self._page_scenes, self._page_clock, self._page_output, self._page_midi, self._page_director,
-                    self._page_ball]
+        builders = [self._page_scenes, self._page_clock, self._page_midi, self._page_ball]
         for name, build in zip(TABS, builders):
             b = Gtk.ToggleButton(label=name, hexpand=True)
             if first is None:
@@ -138,7 +137,6 @@ class ConfigDialog(Adw.Window):
             return False
         if self.library.refresh():
             self._rebuild_scenes()
-            self._rebuild_director_choices()
         return True
 
     # --- Scenes --------------------------------------------------------------------------
@@ -456,34 +454,6 @@ class ConfigDialog(Adw.Window):
         else:
             entry.add_css_class("error")
 
-    # --- Output --------------------------------------------------------------------------
-
-    def _page_output(self, page: Gtk.Box) -> None:
-        self.test_btn = push_button("Show test pattern", "tall")
-        self.test_btn.connect("clicked", lambda *_: self._toggle_test_pattern())
-        g = SettingsGroup("Test pattern")
-        g.add(setting_row("Test pattern", "Shows a grid and a circle on the projector so you can position the output window.", self.test_btn))
-        page.append(g)
-        self.window_sub = label("The renderer is not running.", "row-hint")
-        self.window_chip_box = hbox(0)
-        g2 = SettingsGroup("Output window")
-        row = hbox(12, vbox(1, label("Window state"), self.window_sub, hexpand=True), self.window_chip_box)
-        row.add_css_class("setting-row")
-        g2.add(row)
-        page.append(g2)
-        note = hbox(12, icon("dialog-information-symbolic", 18), label(
-            "The output window is moved to the projector and made fullscreen with GNOME: Super + Shift + ← → changes monitor, F11 toggles fullscreen.",
-            "secondary", wrap=True, hexpand=True))
-        note.add_css_class("note-box")
-        page.append(note)
-
-    def _toggle_test_pattern(self) -> None:
-        on = not (self.main.state or {}).get("test_pattern", False)
-        if self.main.connected:
-            self.main.send("testpattern.set", on=on)
-        else:
-            self.main.toast("Start the renderer first.")
-
     # --- MIDI ----------------------------------------------------------------------------
 
     def _page_midi(self, page: Gtk.Box) -> None:
@@ -609,99 +579,6 @@ class ConfigDialog(Adw.Window):
             self._save_map()
             self._rebuild_mappings()
 
-    # --- Director ------------------------------------------------------------------------
-
-    def _page_director(self, page: Gtk.Box) -> None:
-        d = self.cfg.director
-        every = d.every.in_beats(self.cfg.clock.beats_per_bar) / max(1, self.cfg.clock.beats_per_bar)
-        g = SettingsGroup("Automatic scene changes", "Used by Random mode on the main window.")
-        self.every = Stepper(round(every), 1, 64, 1, lambda v: f"<b>{v:.0f}</b> bars",
-                             lambda v: self.save("director", {"every": {"bars": int(v), "beats": None}}))
-        self.no_repeat = Gtk.Switch(active=d.no_repeat, valign=Gtk.Align.CENTER)
-        self.no_repeat.add_css_class("mb-switch")
-        self.no_repeat.connect("notify::active", lambda s, _p: self.save("director", {"no_repeat": s.get_active()}))
-        g.add(setting_row("Change scene every", None, self.every))
-        g.add(setting_row("Avoid repeating the last scene", None, self.no_repeat))
-        self.tag_row = Adw.WrapBox(child_spacing=6, line_spacing=6)
-        tag_box = vbox(6, label("Only use scenes tagged"), self.tag_row)
-        tag_box.add_css_class("setting-row")
-        g.add(tag_box)
-        page.append(g)
-        self.seq_group = SettingsGroup("Sequence", "Plays in order in Sequence mode.")
-        page.append(self.seq_group)
-        add = push_button("Add scene", "tall", icon_name="list-add-symbolic")
-        add.connect("clicked", lambda *_: self._seq_add())
-        self.loop_sw = Gtk.Switch(active=d.loop, valign=Gtk.Align.CENTER)
-        self.loop_sw.add_css_class("mb-switch")
-        self.loop_sw.connect("notify::active", lambda s, _p: self.save("director", {"loop": s.get_active()}))
-        page.append(hbox(12, add, Gtk.Box(hexpand=True), label("Loop sequence"), self.loop_sw))
-        self.sequence = [(i.scene, i.bars) for i in d.sequence]
-        self._rebuild_director_choices()
-
-    def _all_tags(self) -> list[str]:
-        return sorted({t for sc in self.library.scenes.values() for t in sc.tags})
-
-    def _rebuild_director_choices(self) -> None:
-        if not hasattr(self, "tag_row"):
-            return
-        while (c := self.tag_row.get_first_child()) is not None:
-            self.tag_row.remove(c)
-        active = set(self.cfg.director.pool.tags)
-        for t in self._all_tags():
-            b = Gtk.ToggleButton(label=t, active=t in active)
-            b.add_css_class("chip-toggle")
-            b.connect("toggled", lambda _b: self._save_tags())
-            self.tag_row.append(b)
-        self._rebuild_sequence()
-
-    def _save_tags(self) -> None:
-        tags, c = [], self.tag_row.get_first_child()
-        while c is not None:
-            if c.get_active():
-                tags.append(c.get_label())
-            c = c.get_next_sibling()
-        self.save("director", {"pool": {"tags": tags}})
-
-    def _rebuild_sequence(self) -> None:
-        g = self.seq_group
-        g.clear()
-        ids = self.library.ids()
-        names = [self.library.scenes[s].name for s in ids]
-        if not self.sequence:
-            g.add(setting_row("Empty", "Without a sequence, Sequence mode walks all scenes in alphabetical order."))
-        for i, (scene, bars) in enumerate(self.sequence):
-            dd = dropdown(names, ids.index(scene) if scene in ids else 0, 210,
-                          lambda idx, i=i, ids=ids: self._seq_set(i, scene=ids[idx]))
-            st = Stepper(bars, 1, 64, 1, lambda v: f"<b>{v:.0f}</b> bars", lambda v, i=i: self._seq_set(i, bars=int(v)))
-            rm = Gtk.Button(icon_name="edit-delete-symbolic")
-            rm.add_css_class("mb-btn")
-            rm.connect("clicked", lambda *_a, i=i: self._seq_remove(i))
-            g.add(hbox(12, label(str(i + 1), "kbd"), dd, Gtk.Box(hexpand=True), st, rm, margin_top=8, margin_bottom=8,
-                       margin_start=14, margin_end=14))
-
-    def _seq_save(self) -> None:
-        self.save("director", {"sequence": [{"scene": s, "bars": b} for s, b in self.sequence]})
-
-    def _seq_set(self, i: int, scene: str | None = None, bars: int | None = None) -> None:
-        if self._guard or not (0 <= i < len(self.sequence)):
-            return
-        s, b = self.sequence[i]
-        self.sequence[i] = (scene or s, bars or b)
-        self._seq_save()
-
-    def _seq_add(self) -> None:
-        ids = self.library.ids()
-        if ids:
-            self.sequence.append((ids[0], 8))
-            self._seq_save()
-            self._rebuild_sequence()
-
-    def _seq_remove(self, i: int) -> None:
-        if 0 <= i < len(self.sequence):
-            del self.sequence[i]
-            self._seq_save()
-            self._rebuild_sequence()
-
     # --- Ball ----------------------------------------------------------------------------
 
     def _page_ball(self, page: Gtk.Box) -> None:
@@ -748,30 +625,13 @@ class ConfigDialog(Adw.Window):
     # --- live updates from the renderer --------------------------------------------------
 
     def on_state(self, state: dict[str, Any]) -> None:
-        clock = state["clock"]
         while (c := self.midi_status.get_first_child()) is not None:
             self.midi_status.remove(c)
         text, kind = vm.midi_input_status(state)
         self.midi_status.append(status_chip(text, kind))
-        tp = state.get("test_pattern", False)
-        self.test_btn.get_child().get_last_child().set_text("Hide test pattern" if tp else "Show test pattern")
-        w = state.get("window")
-        while (c := self.window_chip_box.get_first_child()) is not None:
-            self.window_chip_box.remove(c)
-        if w:
-            where = f"{w['monitor']} · " if w.get("monitor") else ""
-            self.window_sub.set_text(f"{where}{w['width']} × {w['height']}")
-            self.window_chip_box.append(status_chip("Fullscreen", "ok") if w["fullscreen"] else status_chip("Windowed", "warn"))
-        else:
-            self.window_sub.set_text("Waiting for the renderer.")
         self._rebuild_mappings_if_connection_changed()
 
-    def on_connection(self, up: bool) -> None:
-        if not up:
-            self.window_sub.set_text("The renderer is not running.")
-            while (c := self.window_chip_box.get_first_child()) is not None:
-                self.window_chip_box.remove(c)
-            self.window_chip_box.append(status_chip("Not running", ""))
+    def on_connection(self, _up: bool) -> None:
         self._rebuild_mappings_if_connection_changed()
 
     def _rebuild_mappings_if_connection_changed(self) -> None:
