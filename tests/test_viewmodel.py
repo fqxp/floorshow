@@ -28,7 +28,7 @@ def test_renderer_chip_texts_match_the_design():
 
 
 def test_clock_text_variants_match_the_design():
-    assert clock_text(clock()) == ("MIDI · Arturia BeatStep · 124.0 BPM", False)
+    assert clock_text(clock()) == ("MIDI · 124.0 BPM · Arturia BeatStep", False)
     assert clock_text(clock(source="internal", bpm=120.0)) == ("Internal · 120 BPM", False)
     assert clock_text(clock(locked=False, bpm=118.2)) == ("MIDI · waiting for clock (holding 118 BPM)", True)
     assert clock_text(None) == ("Internal · 120 BPM", False)

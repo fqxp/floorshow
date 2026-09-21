@@ -429,6 +429,16 @@ class ConfigDialog(Adw.Window):
         self.clock_stack.set_visible_child_name(key)
         self.save("clock", {"source": key})
 
+    def sync_clock_source(self) -> None:
+        """The same setting can be changed from the main window's clock strip while this dialog is open."""
+        self.cfg = self.store.load()
+        self._guard = True
+        try:
+            self.clock_seg.select(self.cfg.clock.source)
+            self.clock_stack.set_visible_child_name(self.cfg.clock.source)
+        finally:
+            self._guard = False
+
     def _on_port(self, idx: int) -> None:
         names = self._ports_for_dropdown()
         if 0 <= idx < len(names) and names[idx] in self._ports:

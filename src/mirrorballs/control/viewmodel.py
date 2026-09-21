@@ -74,7 +74,7 @@ def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_p
     if not clock["locked"]:
         what = "beat notes" if clock.get("midi_mode") == "beats" else "clock"
         return f"MIDI · waiting for {what} (holding {clock['bpm']:.0f} BPM)", True
-    return f"MIDI · {port} · {clock['bpm']:.1f} BPM", False
+    return f"MIDI · {clock['bpm']:.1f} BPM · {port}", False  # tempo before the port: the chip truncates from the right
 
 
 def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, float]:

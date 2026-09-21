@@ -336,6 +336,45 @@ def test_use_internal_clock_banner_writes_config(win, tmp_path):
     assert w.store.load().clock.source == "internal" and ("reload", {}) in fake.sent
 
 
+def test_the_clock_can_be_switched_from_the_main_window(win, tmp_path):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    # without a configured port there is nothing to switch to
+    assert w.clock_seg.selected() == "internal" and not w.clock_seg.buttons["midi"].get_sensitive()
+    w.store.update({"clock": {"midi_port": "VirMIDI 1-0"}})
+    w.cfg = w.store.load()
+    w.refresh()
+    assert w.clock_seg.buttons["midi"].get_sensitive()
+    fake.sent.clear()
+    w.clock_seg.buttons["midi"].set_active(True)  # a click during the show
+    assert w.store.load().clock.source == "midi" and ("reload", {}) in fake.sent
+    w.apply_state(st())  # a state from before the renderer reloaded must not snap the switch back
+    assert w.clock_seg.selected() == "midi"
+    # afterwards the renderer is the authority again, and following it sends nothing
+    w._clock_hold = 0.0
+    fake.sent.clear()
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="VirMIDI 1-0")))
+    assert w.clock_seg.selected() == "midi"
+    w.apply_state(st())
+    assert w.clock_seg.selected() == "internal" and not fake.sent
+
+
+def test_closing_while_the_show_runs_asks_about_the_renderer(win):
+    w, fake = win
+    assert w._on_close_request() is False  # not connected: nothing to ask about
+    w.set_connection(True)
+    w.apply_state(st(running=False))
+    assert w._on_close_request() is False  # stopped: nothing on the projector
+    w.apply_state(st(running=True))
+    assert w._on_close_request() is True  # live: the window stays until the question is answered
+    w._quit_asked = False
+    w._on_quit_response(None, "keep")
+    assert "quit" not in [c for c, _ in fake.sent]
+    w._on_quit_response(None, "quit")
+    assert ("quit", {}) in fake.sent
+
+
 def test_beat_tile_and_pips_follow_the_clock(win):
     w, _ = win
     w.set_connection(True)
@@ -410,7 +449,7 @@ def cfgwin(app, tmp_path, monkeypatch):
     w.apply_state(st(window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1")))
     pump(150)
     yield w, fake, tmp_path
-    for x in (w.config_dialog, w.calibration_dialog, w.calibration_window):
+    for x in (w.config_dialog, w.calibration_window):
         if x:
             x.destroy()
     w.destroy()
@@ -546,18 +585,11 @@ def test_director_and_ball_pages(cfgwin):
     assert "Calibration" not in TABS  # calibration has its own dialog: it is redone at every rig setup
 
 
-def test_the_calibration_dialog_shows_the_saved_values_and_resets_them(cfgwin):
+def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):
     w, fake, tmp = cfgwin
-    (tmp / "config.yaml").write_text("calibration: {left: 0.3, right: 0.7, top: 0.2, bottom: 0.8, calibrated_at: '2020-01-02T03:04'}\n")
-    w.win_action("calibration")  # the menu item, above Configuration
-    d = w.calibration_dialog
-    assert (d.cal_centre.get_text(), d.cal_size.get_text()) == ("960, 540 px", "768 × 648 px")
-    assert d.cal_when.get_text() == "2 Jan, 03:04"
-    d.store.update({"calibration": None, "ball": {"row_pitch_deg": None, "row_offset_deg": 0}})
-    d.reload()
-    assert d.cal_centre.get_text() == "Not calibrated" and d.cal_axis.get_text() == "Not set"
-    d.destroy()
-    w.calibration_dialog = None
+    w.win_action("calibration")  # the menu item, above Configuration: no summary dialog in between
+    assert w.calibration_window is not None and w.calibration_window.step_no == 1
+    w.calibration_window.cancel()
 
 
 def test_scene_file_operations(cfgwin):

@@ -23,12 +23,13 @@ from . import tokens, viewmodel as vm  # noqa: E402
 from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
 from .store import ConfigStore  # noqa: E402
-from .widgets import hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
+from .widgets import Segmented, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
 START_TIMEOUT_S = 12.0
 TAP_SETTLE_S = 2.5  # save the tapped tempo this long after the last tap
 BPM_HOLD_S = 0.6  # likewise for a tempo changed with the scroll wheel
 EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the streamed value until the renderer has applied it
+CLOCK_HOLD_S = 1.5  # likewise for the clock switch: the renderer has to reload the file before it reports the new source
 RIGHT_COLUMN_W = 272
 CONTROLS_MIN_H = 160
 COUNTDOWN_W = 120
@@ -158,14 +159,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_scene: str | None = None
         self._every_hold = 0.0
         self._bpm_hold = 0.0
+        self._clock_hold = 0.0
+        self._clock_target = "internal"
         self._view_key: str | None = None
         self._library_check = 0.0
         self._restart_pending = False
         self._bpm_target = 0.0
         self._scroll_acc = 0.0
         self._tap_timer = 0
+        self._quit_asked = False
         self.config_dialog: Any = None
-        self.calibration_dialog: Any = None
         self.calibration_window: Any = None
 
         cfg = store.load()
@@ -176,6 +179,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build()
         self._install_keys()
         self.add_tick_callback(self._on_tick)
+        self.connect("close-request", self._on_close_request)
         self.refresh()
 
     # --- construction --------------------------------------------------------------------
@@ -252,6 +256,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.beat_tile = BeatTile()
         self.source_chip = label("", "chip", "source")
         self.source_chip.set_halign(Gtk.Align.START)
+        # A MIDI port name can be long ("VirMIDI 1-0 (raw hw:1,0)"); the chip shrinks instead of the window,
+        # never below the width of an internal-clock reading. The full text is in the tooltip.
+        self.source_chip.set_ellipsize(Pango.EllipsizeMode.END)
+        self.source_chip.set_width_chars(20)  # "Internal · 120 BPM" always fits; MIDI readings truncate
+        self.source_chip.set_max_width_chars(40)
         for n in range(1, 5):
             p = label(str(n), "pip", xalign=0.5)
             p.set_size_request(26, 26)
@@ -273,8 +282,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.indicator_sw.connect("notify::active", self._on_indicator_toggled)
         self.indicator_row = hbox(8, label("Indicator", "secondary"), self.indicator_sw)
         self._apply_indicator()
-        strip_right = vbox(10, hbox(12, self.source_chip, Gtk.Box(hexpand=True), self.indicator_row),
-                           hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn), hexpand=True, valign=Gtk.Align.CENTER)
+        # The clock can change mid-show (a DJ program is started, or stops), so the switch belongs here and
+        # not only in the configuration. Both write the same clock.source.
+        self.clock_seg = Segmented([("internal", "Internal"), ("midi", "MIDI")], self.cfg.clock.source,
+                                   self.set_clock_source)
+        strip_right = vbox(10, hbox(12, self.source_chip, Gtk.Box(hexpand=True), self.clock_seg, self.indicator_row),
+                           hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn),
+                           hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, self.beat_tile, strip_right, hexpand=True)
         self.clock_panel.add_css_class("panel")
         self.clock_panel.set_margin_top(0)
@@ -452,7 +466,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _register_actions(self) -> None:
         for name, fn in (
             ("config", lambda *_: self.open_config()),
-            ("calibration", lambda *_: self.open_calibration_dialog()),
+            ("calibration", lambda *_: self.open_calibration()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
             ("shortcuts", lambda *_: self.show_shortcuts()),
             ("about", lambda *_: self.show_about()),
@@ -535,6 +549,36 @@ class MainWindow(Adw.ApplicationWindow):
         self._schedule_persist_tempo()
         return True
 
+    def set_clock_source(self, key: str) -> None:
+        """Switch the beat clock, from the strip on the main window or from the MIDI-lost banner. It is a
+        setting, not a command: the renderer reads clock.source from the file, so it is saved and reloaded."""
+        if self._ui_guard:
+            return
+        try:
+            self.store.update({"clock": {"source": key}})
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the clock source: {e}")
+            self._sync_clock_seg()
+            return
+        self.cfg = self.store.load()
+        self._clock_hold, self._clock_target = time.monotonic() + CLOCK_HOLD_S, key
+        if self.config_dialog:
+            self.config_dialog.sync_clock_source()
+        self.send("reload")
+        self.toast("Internal clock." if key == "internal" else f"MIDI clock · {self.cfg.clock.midi_port or 'no port selected'}")
+
+    def _sync_clock_seg(self) -> None:
+        """Follow the renderer's clock (it is the authority) and keep MIDI out of reach without a port."""
+        st = self.state
+        if time.monotonic() < self._clock_hold:
+            self.clock_seg.select(self._clock_target)  # the renderer has not reloaded yet; do not snap back
+        else:
+            self.clock_seg.select(st["clock"]["source"] if st else self.cfg.clock.source)
+        has_port = bool(self.cfg.clock.midi_port)
+        self.clock_seg.buttons["midi"].set_sensitive(has_port)
+        self.clock_seg.buttons["midi"].set_tooltip_text(
+            None if has_port else "Pick a MIDI port first: Configuration › Clock")
+
     def act_downbeat(self) -> None:
         self.send("sync_downbeat")
 
@@ -580,6 +624,28 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.toast("The renderer is not running.")
 
+    def _on_close_request(self, *_a: Any) -> bool:
+        """The renderer outlives the controller by design, so closing the window while the show is live is
+        ambiguous: ask. Once the show is stopped there is nothing on the projector to protect."""
+        if self._quit_asked or not self.connected or not (self.state or {}).get("running"):
+            return False
+        self._quit_asked = True
+        dlg = Adw.AlertDialog(heading="Quit the renderer too?",
+                              body="The show is running. Left alone, the renderer keeps projecting without the controller.")
+        dlg.add_response("keep", "Keep it running")
+        dlg.add_response("quit", "Quit renderer")
+        dlg.set_response_appearance("quit", Adw.ResponseAppearance.SUGGESTED)  # red is the beat's colour, never a button's
+        dlg.set_default_response("quit")
+        dlg.set_close_response("keep")
+        dlg.connect("response", self._on_quit_response)
+        dlg.present(self)
+        return True  # hold the window open until the question is answered
+
+    def _on_quit_response(self, _d: Any, response: str) -> None:
+        if response == "quit":
+            self.send("quit")
+        self.close()
+
     def open_config(self, tab: str | None = None) -> None:
         from .config_dialog import ConfigDialog
 
@@ -588,13 +654,6 @@ class MainWindow(Adw.ApplicationWindow):
         if tab:
             self.config_dialog.show_tab(tab)
         self.config_dialog.present()
-
-    def open_calibration_dialog(self) -> None:
-        from .calibration_dialog import CalibrationDialog
-
-        if self.calibration_dialog is None:
-            self.calibration_dialog = CalibrationDialog(self)
-        self.calibration_dialog.present()
 
     def open_calibration(self, step: int = 1) -> None:
         """Open the calibration window, optionally on step 2 (ball axis) or 3 (tile rows)."""
@@ -617,9 +676,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def act_banner(self, banner: vm.Banner) -> None:
         if banner.kind == "midi_lost":
-            self.store.update({"clock": {"source": "internal"}})
-            self.send("reload")
-            self.toast("Switched to the internal clock.")
+            self.set_clock_source("internal")
         elif banner.kind == "scene_error" and banner.scene_id:
             p = self.library.path_of(banner.scene_id)
             if p:
@@ -710,7 +767,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._restart_pending = False
                 GLib.timeout_add(RESTART_DELAY_MS, lambda: self.start_renderer() or False)
         self.refresh()
-        for w in (self.config_dialog, self.calibration_dialog, self.calibration_window):
+        for w in (self.config_dialog, self.calibration_window):
             if w:
                 w.on_connection(up)
 
@@ -733,7 +790,7 @@ class MainWindow(Adw.ApplicationWindow):
         if changed or key != self._view_key:
             self._view_key = key
             self.refresh()
-        for w in (self.config_dialog, self.calibration_dialog, self.calibration_window):
+        for w in (self.config_dialog, self.calibration_window):
             if w:
                 w.on_state(state)
 
@@ -804,9 +861,11 @@ class MainWindow(Adw.ApplicationWindow):
                                    st.get("midi") if st else None)
         self.source_chip.set_text(text)
         internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
-        self.source_chip.set_tooltip_text("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock")
+        self.source_chip.set_tooltip_text(
+            f"{text}\n" + ("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock"))
         set_classes(self.source_chip, {"warn": warn})
         set_classes(self.pips_box, {"dim": st is None})
+        self._sync_clock_seg()
         if st:
             self.cfg_bpb = st["clock"]["beats_per_bar"]
             for i, p in enumerate(self._pips):

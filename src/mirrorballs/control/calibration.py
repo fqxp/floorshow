@@ -724,8 +724,6 @@ class CalibrationWindow(Adw.Window):
             GLib.source_remove(self._spin_timer)
             self._spin_timer = 0
         self.main.calibration_window = None
-        if self.main.calibration_dialog:
-            self.main.calibration_dialog.reload()  # Finish wrote config.yaml under it
         self.main.refresh()
         self.destroy()
 
