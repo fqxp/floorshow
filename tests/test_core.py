@@ -413,8 +413,12 @@ def test_calibration_preview_carries_crosshair_rows_and_line_visibility(env):
     assert c.frame(100.0).overlay.rows == ("single", 3.8, 0.4)
     with pytest.raises(ValueError, match="rows.pitch_deg"):  # rejected while parsing, before it reaches the core
         P.parse_command({**base, "rows": {"mode": "zebra", "pitch_deg": 40, "offset_deg": 0}})
+    cmd(c, {**base, "lines": False, "grid": True, "spin": True}, client="ctl")  # step 4: the globe turns
+    assert c.frame(100.0).overlay.spin_deg == pytest.approx((100.0 * 24.0) % 360)
+    assert c.frame(105.0).overlay.spin_deg == pytest.approx((105.0 * 24.0) % 360)
     cmd(c, {**base, "roll_deg": 5, "tilt_deg": 20}, client="ctl")
     assert c.frame(100.0).overlay.lines == (0.3, 0.7, 0.2, 0.8)  # step 1 again: the lines are back
+    assert c.frame(100.0).overlay.spin_deg == 0.0
     cmd(c, {"cmd": "calibration.end", "commit": True}, client="ctl")
     committed = c.calibration(None)
     assert (committed.roll_deg, committed.tilt_deg) == (5.0, 20.0)  # roll and tilt are committed with the lines

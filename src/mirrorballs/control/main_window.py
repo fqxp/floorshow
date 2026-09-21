@@ -165,6 +165,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._scroll_acc = 0.0
         self._tap_timer = 0
         self.config_dialog: Any = None
+        self.calibration_dialog: Any = None
         self.calibration_window: Any = None
 
         cfg = store.load()
@@ -192,6 +193,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_start(self.conn_chip["box"])
         header.set_title_widget(label("Mirrorballs", "title-label"))
         menu = Gio.Menu()
+        menu.append("Calibration…", "win.calibration")
         menu.append("Configuration…", "win.config")
         menu.append("Quit renderer", "win.quit-renderer")
         section = Gio.Menu()
@@ -450,6 +452,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _register_actions(self) -> None:
         for name, fn in (
             ("config", lambda *_: self.open_config()),
+            ("calibration", lambda *_: self.open_calibration_dialog()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
             ("shortcuts", lambda *_: self.show_shortcuts()),
             ("about", lambda *_: self.show_about()),
@@ -586,6 +589,13 @@ class MainWindow(Adw.ApplicationWindow):
             self.config_dialog.show_tab(tab)
         self.config_dialog.present()
 
+    def open_calibration_dialog(self) -> None:
+        from .calibration_dialog import CalibrationDialog
+
+        if self.calibration_dialog is None:
+            self.calibration_dialog = CalibrationDialog(self)
+        self.calibration_dialog.present()
+
     def open_calibration(self, step: int = 1) -> None:
         """Open the calibration window, optionally on step 2 (ball axis) or 3 (tile rows)."""
         from .calibration import CalibrationWindow
@@ -700,7 +710,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._restart_pending = False
                 GLib.timeout_add(RESTART_DELAY_MS, lambda: self.start_renderer() or False)
         self.refresh()
-        for w in (self.config_dialog, self.calibration_window):
+        for w in (self.config_dialog, self.calibration_dialog, self.calibration_window):
             if w:
                 w.on_connection(up)
 
@@ -723,7 +733,7 @@ class MainWindow(Adw.ApplicationWindow):
         if changed or key != self._view_key:
             self._view_key = key
             self.refresh()
-        for w in (self.config_dialog, self.calibration_window):
+        for w in (self.config_dialog, self.calibration_dialog, self.calibration_window):
             if w:
                 w.on_state(state)
 
@@ -1015,7 +1025,8 @@ class MainWindow(Adw.ApplicationWindow):
                              ("Configuration", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"])]),
             ("Calibration", [("Left line", ["A", "D"]), ("Right line", ["J", "L"]), ("Top line", ["W", "S"]),
                              ("Bottom line", ["I", "K"]), ("Move ball", ["←", "↑", "↓", "→"]), ("Grow / shrink", ["+", "−"]),
-                             ("Step", ["1", "2", "3"]), ("Blink / grid", ["B", "G"]), ("Cancel", ["Esc"]), ("Finish", ["Enter"])]),
+                             ("Step", ["1", "2", "3"]), ("Blink / grid", ["B", "G"]), ("Cancel", ["Esc"]),
+                             ("Next step", ["Enter"]), ("Back a step", ["⌫"])]),
         ]
         cols = hbox(32, margin_top=18, margin_bottom=18, margin_start=24, margin_end=24)
         for title, items in rows:

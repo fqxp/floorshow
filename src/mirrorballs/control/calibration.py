@@ -25,12 +25,13 @@ from ..common.geometry import Calibration, ball_to_image  # noqa: E402
 from . import config_model as cm  # noqa: E402
 from . import tokens  # noqa: E402
 from .calibration_model import (  # noqa: E402
-    DEFAULT_PITCH, DEFAULT_SIZE, AxisSession, RowsSession, Session, axis_key_to_action, fmt_px, key_to_action,
-    rows_key_to_action,
+    DEFAULT_PITCH, DEFAULT_SIZE, AxisSession, RowsSession, Session, axis_key_to_action, done_key_to_action, fmt_px,
+    key_to_action, rows_key_to_action,
 )
 from .widgets import Segmented, Stepper, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
 BEGIN_TIMEOUT_S = 1.5  # wait this long for the renderer to report its window size before assuming 1920x1080
+SPIN_DPS, SPIN_TICK_MS = 24.0, 50  # the confirmation globe turns at the renderer's rate (core.CAL_SPIN_DPS)
 
 
 class Diagram(Gtk.DrawingArea):
@@ -95,6 +96,7 @@ class BallDiagram(Gtk.DrawingArea):
         self.set_content_width(270)
         self.set_content_height(230)
         self.roll = self.tilt = 0.0
+        self.spin = 0.0  # degrees the graticule is turned about the pole axis (step 4)
         self.cross: tuple[float, float] | None = None  # pole marker in units of the ball radius (x right, y up)
         self.rows: tuple[float, float, str] | None = None  # pitch, offset, mode
         self.dark = True
@@ -110,7 +112,7 @@ class BallDiagram(Gtk.DrawingArea):
             pen_down = True
 
     def _project(self, lat: float, lon: float) -> tuple[float, float, bool]:
-        la, lo = math.radians(lat), math.radians(lon)
+        la, lo = math.radians(lat), math.radians(lon + self.spin)
         d = (math.cos(la) * math.sin(lo), math.sin(la), math.cos(la) * math.cos(lo))
         x, y, z = ball_to_image(d, self.roll, self.tilt)
         return x, y, z > 0
@@ -182,9 +184,11 @@ class CalibrationWindow(Adw.Window):
         self.rows: RowsSession | None = None
         self.step_no = 1
         self.start_step = start_step
+        self.rows_skipped = False  # step 3 left with Skip: the row grid is not saved
         self.begun = False
         self._begin_deadline = 0.0
         self._closing = False
+        self._spin_timer = 0
         self._build()
         self._install_keys()
         self.connect("close-request", self._on_close_request)
@@ -201,15 +205,13 @@ class CalibrationWindow(Adw.Window):
         header.add_css_class("mb-header")
         header.set_show_start_title_buttons(False)
         header.set_show_end_title_buttons(False)
-        self.edited_chip = label("Edited", "chip", "source")
-        self.edited_chip.set_visible(False)
-        header.pack_start(self.edited_chip)
         header.set_title_widget(label("Calibrate output", "title-label"))
         view.add_top_bar(header)
 
         self.steps = hbox(8, halign=Gtk.Align.CENTER, margin_top=12)
         self.step_pills: list[Gtk.Box] = []
-        for n, (name, optional) in enumerate((("Silhouette", False), ("Ball axis", True), ("Tile rows", True)), start=1):
+        for n, (name, optional) in enumerate((("Silhouette", False), ("Ball axis", True), ("Tile rows", True),
+                                              ("Confirm", False)), start=1):
             pill = hbox(8, label(str(n), "pip", xalign=0.5), label(name, hexpand=False))
             if optional:
                 pill.append(label("optional", "hint"))
@@ -282,17 +284,12 @@ class CalibrationWindow(Adw.Window):
 
         self.reset_btn = push_button("Reset to defaults", "tall")
         self.reset_btn.connect("clicked", lambda *_: self._on_reset())
-        self.advanced_btn = push_button("Advanced…", "tall")
-        self.advanced_btn.set_tooltip_text("Ball axis and tile rows")
-        self.advanced_btn.connect("clicked", lambda *_: self._go(2))
-        self.finish_btn = push_button("Finish", "tall", "primary", kbd_text="Enter")
-        self.finish_btn.add_css_class("on-accent")
-        self.finish_btn.connect("clicked", lambda *_: self.finish())
 
         self.pages = Gtk.Stack(vexpand=True)
         self.pages.add_named(body, "1")
         self.pages.add_named(self._build_axis_page(), "2")
         self.pages.add_named(self._build_rows_page(), "3")
+        self.pages.add_named(self._build_done_page(), "4")
 
         def cancel_btn() -> Gtk.Button:
             b = push_button("Cancel", "tall", kbd_text="Esc")
@@ -304,19 +301,30 @@ class CalibrationWindow(Adw.Window):
             b.connect("clicked", lambda *_: self._go(to))
             return b
 
-        self.next_btn = push_button("Next", "tall", "primary", kbd_text="Enter")
-        self.next_btn.add_css_class("on-accent")
-        self.next_btn.connect("clicked", lambda *_: self._go(3))
-        skip_btn = push_button("Skip", "tall")
-        skip_btn.connect("clicked", lambda *_: self._go(3, apply_axis=False))
-        self.finish3_btn = push_button("Finish", "tall", "primary", kbd_text="Enter")
-        self.finish3_btn.add_css_class("on-accent")
-        self.finish3_btn.connect("clicked", lambda *_: self.finish())
+        def next_btn(to: int, **go: Any) -> Gtk.Button:
+            b = push_button("Next", "tall", "primary", kbd_text="Enter")
+            b.add_css_class("on-accent")
+            b.connect("clicked", lambda *_: self._go(to, **go))
+            return b
+
+        def skip_btn(to: int, **go: Any) -> Gtk.Button:
+            b = push_button("Skip", "tall")
+            b.connect("clicked", lambda *_: self._go(to, **go))
+            return b
+
+        # Every step but the last ends in Next, so the wizard always runs to the confirmation screen.
+        self.next1_btn, self.next_btn, self.next3_btn = next_btn(2), next_btn(3), next_btn(4)
+        self.finish_btn = push_button("Finish", "tall", "primary", kbd_text="Enter")
+        self.finish_btn.add_css_class("on-accent")
+        self.finish_btn.connect("clicked", lambda *_: self.finish())
         self.footers = Gtk.Stack()
         pad = dict(margin_start=24, margin_end=24, margin_top=8, margin_bottom=16)
-        self.footers.add_named(hbox(8, self.reset_btn, Gtk.Box(hexpand=True), cancel_btn(), self.advanced_btn, self.finish_btn, **pad), "1")
-        self.footers.add_named(hbox(8, back_btn(1), Gtk.Box(hexpand=True), cancel_btn(), skip_btn, self.next_btn, **pad), "2")
-        self.footers.add_named(hbox(8, back_btn(2), Gtk.Box(hexpand=True), cancel_btn(), self.finish3_btn, **pad), "3")
+        self.footers.add_named(hbox(8, self.reset_btn, Gtk.Box(hexpand=True), cancel_btn(), self.next1_btn, **pad), "1")
+        self.footers.add_named(hbox(8, back_btn(1), Gtk.Box(hexpand=True), cancel_btn(), skip_btn(3, apply_axis=False),
+                                    self.next_btn, **pad), "2")
+        self.footers.add_named(hbox(8, back_btn(2), Gtk.Box(hexpand=True), cancel_btn(), skip_btn(4, apply_rows=False),
+                                    self.next3_btn, **pad), "3")
+        self.footers.add_named(hbox(8, back_btn(3), Gtk.Box(hexpand=True), cancel_btn(), self.finish_btn, **pad), "4")
         view.set_content(vbox(8, self.instruction, self.pages, self.footers, margin_top=8))
 
     def _build_axis_page(self) -> Gtk.Widget:
@@ -377,6 +385,30 @@ class CalibrationWindow(Adw.Window):
         )
         return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
 
+    def _build_done_page(self) -> Gtk.Widget:
+        self.done_diagram = BallDiagram()
+        left = vbox(12, self.done_diagram, label("The projector shows the same globe on the ball.", "hint", wrap=True),
+                    width_request=270)
+        self.done_silhouette, self.done_axis, self.done_rows = (label("", "secondary") for _ in range(3))
+        summary = vbox(4)
+        for name, w in (("Silhouette", self.done_silhouette), ("Ball axis", self.done_axis), ("Tile rows", self.done_rows)):
+            summary.append(hbox(8, label(name, hexpand=True), w))
+        note = hbox(12, icon("dialog-information-symbolic", 18), label(
+            "Finish writes these values to the configuration and reloads the show. Cancel leaves the saved "
+            "calibration untouched.", "secondary", wrap=True, hexpand=True), valign=Gtk.Align.CENTER)
+        note.add_css_class("note-box")
+        right = vbox(12, label("Calibration is ready to save.", "title-label", xalign=0.0), summary, note, hexpand=True)
+        return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
+
+    def _spin_tick(self) -> bool:
+        """Turn the globe on both the confirmation page and the projector while step 4 is showing."""
+        if self._closing or self.step_no != 4:
+            self._spin_timer = 0
+            return False
+        self.done_diagram.spin = (self.done_diagram.spin + SPIN_DPS * SPIN_TICK_MS / 1000) % 360
+        self.done_diagram.queue_draw()
+        return True
+
     def _install_keys(self) -> None:
         ctrl = Gtk.EventControllerKey()
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -387,7 +419,7 @@ class CalibrationWindow(Adw.Window):
         if mods & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
             return False
         name = Gdk.keyval_name(keyval) or ""
-        mapper = {1: key_to_action, 2: axis_key_to_action, 3: rows_key_to_action}[self.step_no]
+        mapper = {1: key_to_action, 2: axis_key_to_action, 3: rows_key_to_action, 4: done_key_to_action}[self.step_no]
         hit = mapper(name)
         if hit is None:
             return False
@@ -397,7 +429,7 @@ class CalibrationWindow(Adw.Window):
         elif action == "finish":
             self.finish()
         elif action == "next":
-            self._go(3)
+            self._go(self.step_no + 1)
         elif action == "back":
             self._go(self.step_no - 1) if self.step_no > 1 else None
         elif self.step_no == 1:
@@ -443,6 +475,8 @@ class CalibrationWindow(Adw.Window):
                            crosshair=list(self.axis.crosshair_norm()))
         elif self.step_no == 3 and self.rows:
             payload.update(lines=False, grid=False, blink=False, rows=self.rows.preview())
+        elif self.step_no == 4:
+            payload.update(lines=False, grid=True, blink=False, spin=True)
         self.main.send("calibration.preview", **payload)
 
     # --- steps 2 and 3 -------------------------------------------------------------------
@@ -451,21 +485,26 @@ class CalibrationWindow(Adw.Window):
         1: "Move each line until it just touches the edge of the ball.",
         2: "Move the crosshair onto the hanger eyelet at the top of the ball.",
         3: "Nudge the rows until the projected stripes line up with the mirror tiles.",
+        4: "A turning globe is projected onto the ball. Check that it hugs the edges, then finish.",
     }
 
-    def _go(self, step: int, apply_axis: bool = True) -> None:
-        """Switch step. Leaving step 2 applies the crosshair's roll and tilt to the calibration (unless skipped)."""
+    def _go(self, step: int, apply_axis: bool = True, apply_rows: bool = True) -> None:
+        """Switch step. Leaving step 2 or 3 applies what was adjusted there, unless it was skipped."""
         s = self.session
         if s is None or step == self.step_no:
             return
         if self.step_no == 2 and self.axis and apply_axis:
             s.cal = self.axis.calibration()
+        if self.step_no == 3:
+            self.rows_skipped = not apply_rows
         if step == 2:  # rebuilt on every entry: the lines may have changed since the last visit
             self.axis = AxisSession(s.cal, s.width, s.height, step=s.step)
             self.axis_step.select(s.step)
             self.above_seg.select("above" if self.axis.above else "below")
         if step == 3 and self.rows is None:
             self.rows = RowsSession(*self._initial_rows())
+        if step == 4 and not self._spin_timer:
+            self._spin_timer = GLib.timeout_add(SPIN_TICK_MS, self._spin_tick)
         self.step_no = step
         self.pages.set_visible_child_name(str(step))
         self.footers.set_visible_child_name(str(step))
@@ -583,13 +622,11 @@ class CalibrationWindow(Adw.Window):
         for i, pill in enumerate(self.step_pills, start=1):
             set_classes(pill.get_first_child(), {"current": i == self.step_no})
         active = s is not None and self.main.connected
-        for w in (self.finish_btn, self.finish3_btn, self.next_btn, self.advanced_btn, self.reset_btn, self.blink_btn,
+        for w in (self.finish_btn, self.next1_btn, self.next_btn, self.next3_btn, self.reset_btn, self.blink_btn,
                   self.grid_btn, self.step_seg):
             w.set_sensitive(active)
-        dirty = bool(s and (s.dirty or (self.axis and self.axis.dirty) or (self.rows and self.rows.dirty)))
-        self.edited_chip.set_visible(dirty)
         dark = Adw.StyleManager.get_default().get_dark()
-        self.diagram.dark = self.axis_diagram.dark = self.rows_diagram.dark = dark
+        self.diagram.dark = self.axis_diagram.dark = self.rows_diagram.dark = self.done_diagram.dark = dark
         if s is None:
             for w in (self.read_centre, self.read_size, self.read_aspect, self.read_tilt, self.read_roll, self.read_rows,
                       *self.line_read.values()):
@@ -625,6 +662,12 @@ class CalibrationWindow(Adw.Window):
             self.rows_diagram.roll, self.rows_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.rows_diagram.rows = (self.rows.pitch, self.rows.offset, self.rows.mode)
             self.rows_diagram.queue_draw()
+        if self.step_no == 4:
+            self.done_silhouette.set_text(f"{fmt_px(sw)} × {fmt_px(sh)} px at {fmt_px(cx)}, {fmt_px(cy)}")
+            self.done_axis.set_text(" · ".join(self.axis.texts()) if self.axis and self.axis.dirty else "Not set")
+            self.done_rows.set_text(self.rows.text() if self.rows and self.rows.dirty and not self.rows_skipped else "Not set")
+            self.done_diagram.roll, self.done_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
+            self.done_diagram.queue_draw()
 
     def _on_reset(self) -> None:
         if not self.session:
@@ -657,7 +700,8 @@ class CalibrationWindow(Adw.Window):
         data = CalibrationConfig.from_calibration(c).model_dump()
         data["calibrated_at"] = datetime.now().isoformat(timespec="minutes")
         updates: dict[str, Any] = {"calibration": data}
-        if self.rows and self.rows.dirty:  # untouched rows are not saved: an arbitrary default pitch would switch snapping on
+        # untouched or skipped rows are not saved: an arbitrary default pitch would switch snapping on
+        if self.rows and self.rows.dirty and not self.rows_skipped:
             updates["ball"] = {"row_pitch_deg": round(self.rows.pitch, 4), "row_offset_deg": round(self.rows.offset, 4)}
         try:
             self.main.store.update(updates)
@@ -676,7 +720,12 @@ class CalibrationWindow(Adw.Window):
 
     def _close(self) -> None:
         self._closing = True
+        if self._spin_timer:
+            GLib.source_remove(self._spin_timer)
+            self._spin_timer = 0
         self.main.calibration_window = None
+        if self.main.calibration_dialog:
+            self.main.calibration_dialog.reload()  # Finish wrote config.yaml under it
         self.main.refresh()
         self.destroy()
 

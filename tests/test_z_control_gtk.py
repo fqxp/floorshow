@@ -36,6 +36,16 @@ def pump(ms=100):
         ctx.iteration(False)
 
 
+def pump_until(cond, ms=2000):
+    """Pump until ``cond()`` holds. GTK can be busy for longer than a debounce, so waiting for the
+    result keeps the test from depending on how long a fixed pump happens to take."""
+    ctx = GLib.MainContext.default()
+    end = time.time() + ms / 1000
+    while time.time() < end and not cond():
+        ctx.iteration(False)
+    return cond()
+
+
 class FakeClient:
     def __init__(self):
         self.sent = []
@@ -129,7 +139,7 @@ def test_commands_sent_by_the_ui(win):
     w.run_action("step", +1)  # alpha -> beta, with the chosen transition
     w.run_action("mode", "random")
     w.run_action("brightness", +5)
-    pump(120)  # brightness is debounced
+    assert pump_until(lambda: any(c == "master.set" for c, _ in fake.sent))  # brightness is debounced
     cmds = [c for c, _ in fake.sent]
     assert cmds[:2] == ["running.set", "tap"]
     assert fake.sent[0][1] == {"running": False}
@@ -385,6 +395,7 @@ def test_client_talks_to_a_live_renderer(app, tmp_path):
 
 from mirrorballs.common import paths  # noqa: E402
 from mirrorballs.common.config import load_config  # noqa: E402
+from mirrorballs.control.config_dialog import TABS  # noqa: E402
 
 
 @pytest.fixture
@@ -399,7 +410,7 @@ def cfgwin(app, tmp_path, monkeypatch):
     w.apply_state(st(window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1")))
     pump(150)
     yield w, fake, tmp_path
-    for x in (w.config_dialog, w.calibration_window):
+    for x in (w.config_dialog, w.calibration_dialog, w.calibration_window):
         if x:
             x.destroy()
     w.destroy()
@@ -515,7 +526,7 @@ def test_midi_mapping_learn_flow(cfgwin):
     assert load_config(tmp / "config.yaml").midi.map == []
 
 
-def test_director_ball_and_calibration_pages(cfgwin):
+def test_director_and_ball_pages(cfgwin):
     w, fake, tmp = cfgwin
     w.open_config()
     d = w.config_dialog
@@ -532,12 +543,21 @@ def test_director_ball_and_calibration_pages(cfgwin):
     assert d.rows_step.value == 63  # rows follow the diameter (pi * 400 / 20)
     d.rows_step.set_value(50, notify=True)  # and the tile size follows the rows
     assert d.tile_step.value == round(3.14159265 * 400 / 100)
-    assert d.cal_centre.get_text() == "Not calibrated"
+    assert "Calibration" not in TABS  # calibration has its own dialog: it is redone at every rig setup
+
+
+def test_the_calibration_dialog_shows_the_saved_values_and_resets_them(cfgwin):
+    w, fake, tmp = cfgwin
     (tmp / "config.yaml").write_text("calibration: {left: 0.3, right: 0.7, top: 0.2, bottom: 0.8, calibrated_at: '2020-01-02T03:04'}\n")
-    d.cfg = w.store.load()
-    d._update_calibration()
+    w.win_action("calibration")  # the menu item, above Configuration
+    d = w.calibration_dialog
     assert (d.cal_centre.get_text(), d.cal_size.get_text()) == ("960, 540 px", "768 × 648 px")
     assert d.cal_when.get_text() == "2 Jan, 03:04"
+    d.store.update({"calibration": None, "ball": {"row_pitch_deg": None, "row_offset_deg": 0}})
+    d.reload()
+    assert d.cal_centre.get_text() == "Not calibrated" and d.cal_axis.get_text() == "Not set"
+    d.destroy()
+    w.calibration_dialog = None
 
 
 def test_scene_file_operations(cfgwin):
@@ -573,13 +593,13 @@ def test_calibration_window_flow_with_a_fake_renderer(cfgwin):
     assert cal.begun and ("calibration.begin", {}) in fake.sent
     assert fake.sent[-1][0] == "calibration.preview" and fake.sent[-1][1]["left"] == pytest.approx(0.5 - 0.7 / 2 * 9 / 16)
     s = cal.session
-    assert (s.width, s.height) == (1920, 1080) and not s.dirty and not cal.edited_chip.get_visible()
+    assert (s.width, s.height) == (1920, 1080) and not s.dirty
     assert cal.read_centre.get_text() == "960, 540 px" and cal.read_size.get_text() == "756 × 756 px"
     for key in ("a", "a", "3", "d"):
         from mirrorballs.control.calibration_model import key_to_action
 
         cal._act(*key_to_action(key))
-    assert s.dirty and cal.edited_chip.get_visible()
+    assert s.dirty
     assert fake.sent[-1][0] == "calibration.preview" and fake.sent[-1][1]["active"] == "left"
     assert s.step == "coarse"
     cal._act("grid", None)
@@ -708,7 +728,6 @@ def test_axis_step_drives_the_renderer_overlay_and_saves_roll_and_tilt(cfgwin):
     for _ in range(8):
         cal._axis_act("cross", (0, 1))
     assert cal.axis.dirty and last_preview(fake)["tilt_deg"] > 5 and "above" in cal.read_tilt.get_text()
-    assert cal.edited_chip.get_visible()
     cal._axis_set_above(False)
     assert last_preview(fake)["tilt_deg"] < -5 and "below" in cal.read_tilt.get_text()
     cal._axis_set_above(True)
@@ -757,7 +776,7 @@ def test_rows_step_nudges_and_persists(cfgwin):
     cal._rows_set_pattern("single")
     p = last_preview(fake)
     assert p["rows"] == {"mode": "single", "pitch_deg": 4.1, "offset_deg": 1.0} and cal.rows_step.selected() == "coarse"
-    assert cal.read_rows.get_text() == "rows ≈ 43.9 · tile 4.1°" and cal.edited_chip.get_visible()
+    assert cal.read_rows.get_text() == "rows ≈ 43.9 · tile 4.1°"
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
     assert (b.row_pitch_deg, b.row_offset_deg) == (4.1, 1.0)
@@ -776,6 +795,48 @@ def test_rows_start_from_the_configured_ball_size_and_back_navigation(cfgwin):
     p = last_preview(fake)
     assert p.get("lines", True) is True and p.get("crosshair") is None and p.get("rows") is None
     assert cal.footers.get_visible_child_name() == "1"
+
+
+def test_every_step_leads_to_the_confirmation_screen(cfgwin):
+    w, fake, tmp = cfgwin
+    from mirrorballs.control.calibration_model import done_key_to_action, key_to_action, rows_key_to_action
+
+    w.open_calibration()
+    cal = w.calibration_window
+    assert key_to_action("Return") == ("next", None)  # step 1 no longer finishes early
+    for step in (2, 3, 4):
+        cal._on_key(None, Gdk.KEY_Return, 0, Gdk.ModifierType(0))
+        assert cal.step_no == step and cal.footers.get_visible_child_name() == str(step)
+    assert rows_key_to_action("Return") == ("next", None) and done_key_to_action("Return") == ("finish", None)
+    p = last_preview(fake)
+    assert p["spin"] is True and p["grid"] is True and p["lines"] is False
+    assert cal.done_silhouette.get_text() == "756 × 756 px at 960, 540"
+    assert cal.done_axis.get_text() == "Not set" and cal.done_rows.get_text() == "Not set"
+    spin = cal.done_diagram.spin
+    cal._spin_tick()
+    assert cal.done_diagram.spin > spin  # the globe turns while the step shows
+    cal.finish()
+    assert load_config(tmp / "config.yaml").calibration is not None
+
+
+def test_skipping_the_rows_step_leaves_them_unsaved(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._go(3)
+    cal._rows_act("offset", +1)
+    cal._go(4, apply_rows=False)  # Skip: what was nudged here is dropped
+    assert cal.rows_skipped and cal.done_rows.get_text() == "Not set"
+    cal.finish()
+    assert load_config(tmp / "config.yaml").ball.row_pitch_deg is None
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._go(3)
+    cal._rows_act("offset", +1)
+    cal._go(4)  # Next: they are kept
+    assert not cal.rows_skipped and cal.done_rows.get_text().startswith("rows")
+    cal.finish()
+    assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(0.2)
 
 
 def test_step_keys_reach_the_right_handlers(cfgwin):

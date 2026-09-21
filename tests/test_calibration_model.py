@@ -89,7 +89,7 @@ def test_preview_payload_is_a_valid_protocol_message():
     ("w", ("line", ("top", -1))), ("s", ("line", ("top", +1))), ("i", ("line", ("bottom", -1))), ("k", ("line", ("bottom", +1))),
     ("Left", ("move", (-1, 0))), ("Down", ("move", (0, 1))), ("plus", ("grow", 1)), ("minus", ("grow", -1)), ("KP_Add", ("grow", 1)),
     ("1", ("step", "fine")), ("3", ("step", "coarse")), ("b", ("blink", None)), ("G", ("grid", None)),
-    ("Escape", ("cancel", None)), ("Return", ("finish", None)), ("KP_Enter", ("finish", None)),
+    ("Escape", ("cancel", None)), ("Return", ("next", None)), ("KP_Enter", ("next", None)),
 ])
 def test_key_map_matches_the_shortcut_sheet(key, expected):
     assert key_to_action(key) == expected
@@ -109,7 +109,9 @@ def test_fmt_px():
 import math  # noqa: E402
 
 from mirrorballs.common.geometry import pole_marker  # noqa: E402
-from mirrorballs.control.calibration_model import AxisSession, RowsSession, axis_key_to_action, rows_key_to_action  # noqa: E402
+from mirrorballs.control.calibration_model import (  # noqa: E402
+    AxisSession, RowsSession, axis_key_to_action, done_key_to_action, rows_key_to_action,
+)
 
 
 def axis(**kw):
@@ -222,5 +224,10 @@ def test_rows_offset_only_matters_modulo_a_row():
 
 def test_rows_keys():
     assert rows_key_to_action("Up") == ("offset", 1) and rows_key_to_action("Left") == ("pitch", -1)
-    assert rows_key_to_action("z") == ("pattern", None) and rows_key_to_action("Return") == ("finish", None)
+    assert rows_key_to_action("z") == ("pattern", None) and rows_key_to_action("Return") == ("next", None)
     assert rows_key_to_action("x") is None
+
+
+def test_the_confirmation_step_only_navigates():
+    assert done_key_to_action("Return") == ("finish", None) and done_key_to_action("BackSpace") == ("back", None)
+    assert done_key_to_action("Escape") == ("cancel", None) and done_key_to_action("Up") is None

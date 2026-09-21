@@ -2,9 +2,10 @@
 
 > **Work in progress: the app.** The demo below is being turned into a two-process app: a
 > projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
-> The controller's main window, configuration dialog and calibration window (step 1, the silhouette) are built;
-> the motor is not. Calibration has three steps: the silhouette, the ball axis (roll and tilt, from where the
-> pole eyelet appears) and the tile rows (pitch and offset, checked with a zebra of stripes).
+> The controller's main window, configuration dialog and calibration are built; the motor is not.
+> Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
+> wizard: the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the tile rows
+> (pitch and offset, checked with a zebra of stripes) and a confirmation step that projects a turning globe.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
 ## The app

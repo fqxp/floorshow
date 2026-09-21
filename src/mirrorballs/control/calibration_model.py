@@ -38,7 +38,7 @@ def key_to_action(name: str) -> tuple[str, Any] | None:
     if n == "Escape":
         return ("cancel", None)
     if n in ("Return", "KP_Enter"):
-        return ("finish", None)
+        return ("next", None)
     return None
 
 
@@ -252,7 +252,13 @@ def rows_key_to_action(name: str) -> tuple[str, Any] | None:
         return ("step", STEP_KEYS[n])
     if n == "z":
         return ("pattern", None)
-    return {"Escape": ("cancel", None), "Return": ("finish", None), "KP_Enter": ("finish", None), "BackSpace": ("back", None)}.get(n)
+    return {"Escape": ("cancel", None), "Return": ("next", None), "KP_Enter": ("next", None), "BackSpace": ("back", None)}.get(n)
+
+
+def done_key_to_action(name: str) -> tuple[str, Any] | None:
+    """Step 4 (confirmation) only navigates: there is nothing left to adjust."""
+    return {"Escape": ("cancel", None), "Return": ("finish", None), "KP_Enter": ("finish", None),
+            "BackSpace": ("back", None)}.get(name)
 
 
 @dataclass

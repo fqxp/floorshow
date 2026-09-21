@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 3
+REV = 4
 
 
 class _Cmd(BaseModel):
@@ -87,6 +87,7 @@ class CalibrationPreview(_Cmd):
     lines: bool = True  # the four silhouette lines (step 1)
     crosshair: tuple[float, float] | None = None  # step 2: where the pole marker is drawn (window fractions, top-down)
     rows: RowsPreview | None = None  # step 3: the tile-row stripes
+    spin: bool = False  # step 4: turn the grid about the ball's axis, so the ball looks like it is spinning
 
 
 class CalibrationEnd(_Cmd):

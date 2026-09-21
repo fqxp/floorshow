@@ -23,7 +23,7 @@ from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, Stepper, hbox, icon, label, push_button, set_classes, setting_row, status_chip, vbox,
 )
 
-TABS = ["Scenes", "Clock", "Output", "MIDI", "Director", "Calibration", "Ball"]
+TABS = ["Scenes", "Clock", "Output", "MIDI", "Director", "Ball"]
 SAVE_DELAY_MS = 250
 
 
@@ -67,7 +67,7 @@ class ConfigDialog(Adw.Window):
         first: Gtk.ToggleButton | None = None
         self.tab_buttons: dict[str, Gtk.ToggleButton] = {}
         builders = [self._page_scenes, self._page_clock, self._page_output, self._page_midi, self._page_director,
-                    self._page_calibration, self._page_ball]
+                    self._page_ball]
         for name, build in zip(TABS, builders):
             b = Gtk.ToggleButton(label=name, hexpand=True)
             if first is None:
@@ -692,56 +692,6 @@ class ConfigDialog(Adw.Window):
             self._seq_save()
             self._rebuild_sequence()
 
-    # --- Calibration ---------------------------------------------------------------------
-
-    def _page_calibration(self, page: Gtk.Box) -> None:
-        self.cal_centre, self.cal_size = label("", "secondary"), label("", "secondary")
-        self.cal_axis, self.cal_when = label("Not set", "secondary"), label("", "secondary")
-        g = SettingsGroup("Current calibration")
-        g.add(setting_row("Centre", None, self.cal_centre))
-        g.add(setting_row("Size", None, self.cal_size))
-        g.add(setting_row("Ball axis and tile rows", "Optional advanced steps.", self.cal_axis))
-        g.add(setting_row("Last calibrated", None, self.cal_when))
-        page.append(g)
-        cal = push_button("Calibrate…", "tall", "primary")
-        cal.add_css_class("on-accent")
-        cal.connect("clicked", lambda *_: self.main.open_calibration())
-        reset = push_button("Reset to defaults", "tall")
-        reset.connect("clicked", lambda *_: self._confirm_reset())
-        page.append(hbox(8, cal, reset, label("Reset asks for confirmation.", "hint", hexpand=True), valign=Gtk.Align.CENTER))
-        self._update_calibration()
-
-    def _update_calibration(self) -> None:
-        if not hasattr(self, "cal_centre"):
-            return
-        w = (self.main.state or {}).get("window") if self.main.connected else None
-        width, height = (w["width"], w["height"]) if w else (1920, 1080)
-        cal = self.cfg.calibration
-        centre, size = cm.calibration_readout(cal.model_dump() if cal else None, width, height)
-        self.cal_centre.set_text(centre)
-        self.cal_size.set_text(size)
-        axis = bool(cal and (cal.roll_deg or cal.tilt_deg)) or self.cfg.ball.row_pitch_deg is not None
-        self.cal_axis.set_text("Set" if axis else "Not set")
-        self.cal_when.set_text(cm.describe_time(cal.calibrated_at if cal else None))
-
-    def _confirm_reset(self) -> None:
-        dlg = Adw.AlertDialog(heading="Reset calibration to defaults?",
-                              body="Centre, size, ball axis and tile rows go back to their factory values. This cannot be undone.")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("reset", "Reset to defaults")
-        dlg.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
-
-        def go(_d: Any, r: str) -> None:
-            if r == "reset":
-                self.store.update({"calibration": None, "ball": {"row_pitch_deg": None, "row_offset_deg": 0}})
-                self.cfg = self.main.cfg = self.store.load()
-                self.main.send("reload")
-                self._update_calibration()
-                self.main.toast("Calibration reset.")
-
-        dlg.connect("response", go)
-        dlg.present(self)
-
     # --- Ball ----------------------------------------------------------------------------
 
     def _page_ball(self, page: Gtk.Box) -> None:
@@ -804,7 +754,6 @@ class ConfigDialog(Adw.Window):
             self.window_chip_box.append(status_chip("Fullscreen", "ok") if w["fullscreen"] else status_chip("Windowed", "warn"))
         else:
             self.window_sub.set_text("Waiting for the renderer.")
-        self._update_calibration()
         self._rebuild_mappings_if_connection_changed()
 
     def on_connection(self, up: bool) -> None:

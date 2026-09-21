@@ -27,6 +27,7 @@ FILE_POLL_S = 0.5
 FADE_S = 0.4  # blackout fade
 OUTPUT_STALL_S = 1.5  # no frame presented for this long: the window is hidden or covered
 DEFAULT_TILE_DEG = 4.0
+CAL_SPIN_DPS = 24.0  # the confirmation step turns the grid at a mirror ball's pace: 15 s per revolution
 EASE = {
     "linear": lambda u: u,
     "in": lambda u: u * u,
@@ -538,6 +539,7 @@ class Core:
                     levels=levels, grid=pv["grid"],  # type: ignore[arg-type]
                     crosshair=tuple(pv["crosshair"]) if pv.get("crosshair") else None,
                     rows=(rows["mode"], rows["pitch_deg"], rows["offset_deg"]) if rows else None,
+                    spin_deg=(now * CAL_SPIN_DPS) % 360.0 if pv.get("spin") else 0.0,
                 )
             return FrameSpec(cal=cal_view, incoming=None, overlay=overlay)
 

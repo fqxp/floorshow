@@ -7,6 +7,7 @@ uniform float u_master;         // brightness incl. blackout fade
 uniform vec4 u_lines;           // calibration lines L, R, T, B as fractions (top-down); x<0 = off
 uniform vec4 u_lineLevels;      // brightness of each line (last-moved one brighter)
 uniform int u_grid;             // verification grid on/off
+uniform float u_gridSpin;       // degrees the grid is turned about the pole axis (step 4's spinning ball)
 uniform vec2 u_cross;           // pole crosshair centre (x, y as fractions, top-down); x < 0 = off
 uniform vec4 u_rows;            // tile rows: mode (0 off, 1 zebra, 2 single row), pitch deg, offset deg, zebra limit deg
 
@@ -64,7 +65,7 @@ void main() {
         if (pixelToImageDir(gl_FragCoord.xy, dImg)) {
             vec3 d = u_imgToBall * dImg;
             float lat = degrees(asin(clamp(d.y, -1.0, 1.0)));
-            float lon = degrees(atan(d.x, d.z));
+            float lon = degrees(atan(d.x, d.z)) - u_gridSpin;
             float g = max(gridLine(lat / 30.0), gridLine(lon / 30.0)) * 0.55;
             float equator = 1.0 - smoothstep(0.5, 1.5, abs(lat) / max(fwidth(lat), 1e-4));
             vec2 q = vec2((uv.x - u_cal.x) / u_cal.z, (uv.y - u_cal.y) / u_cal.w);

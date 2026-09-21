@@ -36,6 +36,7 @@ class Overlay:
     grid: bool = False
     crosshair: tuple[float, float] | None = None  # window fractions, top-down
     rows: tuple[str, float, float] | None = None  # (mode "zebra" | "single", pitch deg, offset deg)
+    spin_deg: float = 0.0  # turns the grid's meridians about the pole axis; latitudes are unaffected by a spin
 
 
 def rotation_matrix(axis: str, angle: float) -> np.ndarray:
@@ -195,6 +196,7 @@ class GlPipeline:
         p["u_lines"].value = ov.lines if ov.lines else (-1.0, 0.0, 0.0, 0.0)
         p["u_lineLevels"].value = ov.levels
         p["u_grid"].value = 1 if ov.grid else 0
+        p["u_gridSpin"].value = ov.spin_deg
         p["u_cross"].value = ov.crosshair if ov.crosshair else (-1.0, 0.0)
         mode = {"zebra": 1.0, "single": 2.0}[ov.rows[0]] if ov.rows else 0.0
         p["u_rows"].value = (mode, ov.rows[1], ov.rows[2], ZEBRA_LIMIT_DEG) if ov.rows else (0.0, 4.0, 0.0, ZEBRA_LIMIT_DEG)
