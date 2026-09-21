@@ -175,7 +175,7 @@ class BallDiagram(Gtk.DrawingArea):
 
 
 class CalibrationWindow(Adw.Window):
-    def __init__(self, main: Any, start_step: int = 1):
+    def __init__(self, main: Any):
         super().__init__(title="Calibrate output", modal=True, transient_for=main, default_width=720, default_height=560)
         self.add_css_class("mb-dialog")
         self.main = main
@@ -183,7 +183,6 @@ class CalibrationWindow(Adw.Window):
         self.axis: AxisSession | None = None
         self.rows: RowsSession | None = None
         self.step_no = 1
-        self.start_step = start_step
         self.rows_cleared = False  # step 3 was reset to defaults: the saved row grid is dropped
         self.begun = False
         self._begin_deadline = 0.0
@@ -363,6 +362,14 @@ class CalibrationWindow(Adw.Window):
         self.read_rows = label("", "secondary")
         left = vbox(12, self.rows_diagram, hbox(8, label("Result", hexpand=True), self.read_rows),
                     label("Read only. Calculated from offset and pitch.", "hint", wrap=True), width_request=270)
+        b = self.main.store.load().ball
+        self.ball_saved = bool(b.diameter_cm and b.tile_mm)
+        self.ball_diameter, self.ball_tile = b.diameter_cm or 30.0, b.tile_mm or 10.0
+        self._ball_initial = (self.ball_diameter, self.ball_tile)
+        self.diameter_step = Stepper(self.ball_diameter, 5, 200, 1, lambda v: f"<b>{v:.0f}</b> cm",
+                                     lambda v: self._ball_changed(diameter=v), width=140)
+        self.tile_step = Stepper(self.ball_tile, 2, 50, 1, lambda v: f"<b>{v:.0f}</b> mm",
+                                 lambda v: self._ball_changed(tile=v), width=140)
 
         def nudge(name: str, sub: str, neg: tuple[str, str, Any], pos: tuple[str, str, Any]) -> Gtk.Widget:
             row = hbox(6, vbox(2, label(name), label(sub, "hint")), Gtk.Box(hexpand=True))
@@ -381,9 +388,27 @@ class CalibrationWindow(Adw.Window):
             nudge("Pitch", "narrower / wider", ("←", "go-previous-symbolic", ("pitch", -1)), ("→", "go-next-symbolic", ("pitch", +1))),
             hbox(12, label("Step", hexpand=True), self.rows_step),
             vbox(6, vbox(0, label("Pattern"), label("shown on the ball", "hint")), self.pattern_seg),
+            vbox(6, vbox(0, label("Start from the ball's size"),
+                         label("Sets the pitch to begin nudging from", "hint", wrap=True)),
+                 hbox(12, label("Diameter", hexpand=True), self.diameter_step),
+                 hbox(12, label("Tile size", hexpand=True), self.tile_step)),
             hexpand=True,
         )
         return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
+
+    def _ball_changed(self, diameter: float | None = None, tile: float | None = None) -> None:
+        """The ball's measurements only seed the pitch; the zebra then decides it. Without a seed within
+        about 20 % the zebra is ambiguous, because lighting every second row looks just as crisp."""
+        if getattr(self, "_syncing", False):
+            return
+        self.ball_diameter = diameter if diameter is not None else self.ball_diameter
+        self.ball_tile = tile if tile is not None else self.ball_tile
+        self.ball_saved = True
+        if self.rows:
+            self.rows.set_pitch(cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)))
+            self.rows_cleared = False
+            self._send_preview()
+        self._update()
 
     def _build_done_page(self) -> Gtk.Widget:
         self.done_diagram = BallDiagram()
@@ -461,9 +486,6 @@ class CalibrationWindow(Adw.Window):
         self.begun = True
         self.main.send("calibration.begin")
         self._send_preview()
-        if self.start_step != 1:  # opened from "Advanced calibration..."
-            self._go(self.start_step)
-            self.start_step = 1
 
     def _send_preview(self) -> None:
         if not self.session:
@@ -514,8 +536,8 @@ class CalibrationWindow(Adw.Window):
         b = self.main.store.load().ball
         if b.row_pitch_deg:
             return b.row_pitch_deg, b.row_offset_deg
-        if b.diameter_cm and b.tile_mm:
-            return cm.pitch_from_rows(cm.rows_from_tile(b.diameter_cm, b.tile_mm)), 0.0
+        if self.ball_saved:  # never calibrated, but the ball's measurements are on file
+            return cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)), 0.0
         return DEFAULT_PITCH, 0.0
 
     def _axis_act(self, action: str, arg: Any) -> None:
@@ -723,10 +745,15 @@ class CalibrationWindow(Adw.Window):
         data = CalibrationConfig.from_calibration(c).model_dump()
         data["calibrated_at"] = datetime.now().isoformat(timespec="minutes")
         updates: dict[str, Any] = {"calibration": data}
+        ball: dict[str, Any] = {}
+        if (self.ball_diameter, self.ball_tile) != self._ball_initial:  # remembered for the next calibration
+            ball.update(diameter_cm=self.ball_diameter, tile_mm=self.ball_tile)
         if self.rows_cleared:  # step 3 was reset: snapping goes off again
-            updates["ball"] = {"row_pitch_deg": None, "row_offset_deg": 0.0}
+            ball.update(row_pitch_deg=None, row_offset_deg=0.0)
         elif self.rows and self.rows.dirty:  # untouched rows are not saved: a default pitch would switch snapping on
-            updates["ball"] = {"row_pitch_deg": round(self.rows.pitch, 4), "row_offset_deg": round(self.rows.offset, 4)}
+            ball.update(row_pitch_deg=round(self.rows.pitch, 4), row_offset_deg=round(self.rows.offset, 4))
+        if ball:
+            updates["ball"] = ball
         try:
             self.main.store.update(updates)
         except Exception as e:  # noqa: BLE001

@@ -284,9 +284,12 @@ class RowsSession:
         self.offset += sign * OFFSET_STEP[self.step]
         self._wrap()
 
-    def nudge_pitch(self, sign: int) -> None:
-        self.pitch = min(MAX_PITCH, max(MIN_PITCH, self.pitch + sign * PITCH_STEP[self.step]))
+    def set_pitch(self, value: float) -> None:
+        self.pitch = min(MAX_PITCH, max(MIN_PITCH, value))
         self._wrap()
+
+    def nudge_pitch(self, sign: int) -> None:
+        self.set_pitch(self.pitch + sign * PITCH_STEP[self.step])
 
     def apply(self, action: str, arg: Any) -> None:
         if action == "offset":

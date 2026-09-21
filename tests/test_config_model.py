@@ -1,4 +1,3 @@
-from datetime import datetime
 
 import pytest
 from ruamel.yaml import YAML
@@ -28,21 +27,7 @@ def test_actions():
 
 def test_ball_conversions_match_the_design_example():
     assert cm.rows_from_tile(30, 10) == pytest.approx(47.12, abs=0.01)  # the design shows 47 rows for 30 cm / 10 mm
-    assert cm.tile_from_rows(30, cm.rows_from_tile(30, 10)) == pytest.approx(10)
     assert cm.pitch_from_rows(47.3) == pytest.approx(3.806, abs=0.001)  # design: "rows ≈ 47.3 · tile 3.8°"
-
-
-def test_describe_time():
-    now = datetime(2026, 9, 18, 22, 0)
-    assert cm.describe_time("2026-09-18T21:14", now) == "Today, 21:14"
-    assert cm.describe_time("2026-09-17T09:02", now) == "Yesterday, 09:02"
-    assert cm.describe_time("2026-09-01T18:30", now) == "1 Sep, 18:30"
-    assert cm.describe_time(None, now) == "Never" and cm.describe_time("garbage", now) == "Never"
-
-
-def test_calibration_readout():
-    assert cm.calibration_readout({"left": 0.3, "right": 0.7, "top": 0.2, "bottom": 0.8}, 1920, 1080) == ("960, 540 px", "768 × 648 px")
-    assert cm.calibration_readout(None, 1920, 1080)[0] == "Not calibrated"
 
 
 # --- scene files ---------------------------------------------------------------------------

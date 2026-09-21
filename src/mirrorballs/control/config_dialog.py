@@ -1,4 +1,4 @@
-"""Configuration dialog, built from the design's Config boards: seven tabs of setting rows.
+"""Configuration dialog: the settings that stay put between shows (scenes, clock, MIDI).
 
 Every change is saved to config.yaml (debounced) and the renderer is told to reload, so the
 show reacts immediately. The dialog holds no state the files do not have.
@@ -23,7 +23,7 @@ from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, Stepper, hbox, icon, label, push_button, set_classes, setting_row, status_chip, vbox,
 )
 
-TABS = ["Scenes", "Clock", "MIDI", "Ball"]
+TABS = ["Scenes", "Clock", "MIDI"]
 SAVE_DELAY_MS = 250
 
 
@@ -66,7 +66,7 @@ class ConfigDialog(Adw.Window):
         tabs.add_css_class("tabs")
         first: Gtk.ToggleButton | None = None
         self.tab_buttons: dict[str, Gtk.ToggleButton] = {}
-        builders = [self._page_scenes, self._page_clock, self._page_midi, self._page_ball]
+        builders = [self._page_scenes, self._page_clock, self._page_midi]
         for name, build in zip(TABS, builders):
             b = Gtk.ToggleButton(label=name, hexpand=True)
             if first is None:
@@ -578,49 +578,6 @@ class ConfigDialog(Adw.Window):
             self.learn_bar.set_visible(False)
             self._save_map()
             self._rebuild_mappings()
-
-    # --- Ball ----------------------------------------------------------------------------
-
-    def _page_ball(self, page: Gtk.Box) -> None:
-        b = self.cfg.ball
-        page.append(label("Starting values for calibration. Calibration refines them.", "secondary"))
-        d_cm = b.diameter_cm or 30.0
-        rows = 180.0 / b.row_pitch_deg if b.row_pitch_deg else cm.rows_from_tile(d_cm, b.tile_mm or 10.0)
-        self._ball = {"d": d_cm, "tile": b.tile_mm or cm.tile_from_rows(d_cm, rows), "rows": rows}
-        self.d_step = Stepper(d_cm, 5, 200, 1, lambda v: f"<b>{v:.0f}</b> cm", lambda v: self._ball_changed("d", v))
-        self.tile_step = Stepper(round(self._ball["tile"]), 2, 50, 1, lambda v: f"<b>{v:.0f}</b> mm", lambda v: self._ball_changed("tile", v))
-        self.rows_step = Stepper(round(rows), 8, 300, 1, lambda v: f"<b>{v:.0f}</b>", lambda v: self._ball_changed("rows", v))
-        g = SettingsGroup()
-        g.add(setting_row("Ball diameter", None, self.d_step))
-        g.add(setting_row("Tile size", None, self.tile_step))
-        g.add(setting_row("Number of tile rows", "Alternative to tile size.", self.rows_step))
-        page.append(g)
-        motor = Gtk.Switch(valign=Gtk.Align.CENTER, sensitive=False)
-        motor.add_css_class("mb-switch")
-        g2 = SettingsGroup("Motor")
-        g2.add(setting_row("Rotation motor", "Not connected.", status_chip("Coming later", ""), motor))
-        page.append(g2)
-        g3 = SettingsGroup("Advanced")
-        adv = push_button("Advanced calibration…")
-        adv.set_tooltip_text("Ball axis and tile rows")
-        adv.connect("clicked", lambda *_: self.main.open_calibration(step=2))
-        g3.add(setting_row("Advanced calibration…", "Ball axis and tile rows.", adv))
-        page.append(g3)
-
-    def _ball_changed(self, which: str, v: float) -> None:
-        b = self._ball
-        b[which] = v
-        self._guard = True
-        try:
-            if which in ("d", "tile"):
-                b["rows"] = cm.rows_from_tile(b["d"], b["tile"])
-                self.rows_step.set_value(round(b["rows"]))
-            else:
-                b["tile"] = cm.tile_from_rows(b["d"], b["rows"])
-                self.tile_step.set_value(round(b["tile"]))
-        finally:
-            self._guard = False
-        self.save("ball", {"diameter_cm": b["d"], "tile_mm": round(b["tile"], 2), "row_pitch_deg": round(cm.pitch_from_rows(b["rows"]), 4)})
 
     # --- live updates from the renderer --------------------------------------------------
 

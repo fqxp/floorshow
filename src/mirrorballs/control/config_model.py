@@ -1,9 +1,8 @@
-"""Pure helpers behind the configuration dialog (no GTK): labels, conversions, time formatting."""
+"""Pure helpers behind the configuration dialog and the calibration wizard (no GTK)."""
 
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from typing import Any
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -58,36 +57,6 @@ def rows_from_tile(diameter_cm: float, tile_mm: float) -> float:
     return math.pi * diameter_cm * 10 / (2 * tile_mm)
 
 
-def tile_from_rows(diameter_cm: float, rows: float) -> float:
-    return math.pi * diameter_cm * 10 / (2 * rows)
-
-
 def pitch_from_rows(rows: float) -> float:
     """Latitude pitch in degrees of one tile row."""
     return 180.0 / rows
-
-
-def describe_time(iso: str | None, now: datetime | None = None) -> str:
-    """"Today, 21:14" / "Yesterday, 09:02" / "12 Sep, 18:30" / "Never"."""
-    if not iso:
-        return "Never"
-    try:
-        t = datetime.fromisoformat(iso)
-    except ValueError:
-        return "Never"
-    now = now or datetime.now()
-    days = (now.date() - t.date()).days
-    if days == 0:
-        return f"Today, {t:%H:%M}"
-    if days == 1:
-        return f"Yesterday, {t:%H:%M}"
-    return f"{t.day} {t:%b}, {t:%H:%M}"
-
-
-def calibration_readout(cal: dict[str, float] | None, width: int, height: int) -> tuple[str, str]:
-    """(centre text, size text) of a saved calibration in pixels of the given output size."""
-    if cal is None:
-        return "Not calibrated", "default: 70 % of the screen height"
-    cx, cy = (cal["left"] + cal["right"]) / 2 * width, (cal["top"] + cal["bottom"]) / 2 * height
-    sw, sh = (cal["right"] - cal["left"]) * width, (cal["bottom"] - cal["top"]) * height
-    return f"{cx:.0f}, {cy:.0f} px", f"{sw:.0f} × {sh:.0f} px"

@@ -548,19 +548,10 @@ def test_midi_mapping_learn_flow(cfgwin):
     assert load_config(tmp / "config.yaml").midi.map == []
 
 
-def test_ball_page(cfgwin):
-    w, fake, tmp = cfgwin
-    w.open_config()
-    d = w.config_dialog
-    d.d_step.set_value(40, notify=True)  # diameter 40 cm with 10 mm tiles
-    d._flush()
-    cfg = load_config(tmp / "config.yaml")
-    assert cfg.ball.diameter_cm == 40 and cfg.ball.row_pitch_deg == pytest.approx(180 / (3.14159265 * 400 / 20), rel=0.02)
-    assert d.rows_step.value == 63  # rows follow the diameter (pi * 400 / 20)
-    d.rows_step.set_value(50, notify=True)  # and the tile size follows the rows
-    assert d.tile_step.value == round(3.14159265 * 400 / 100)
-    # calibration has its own dialog, and the window is positioned with GNOME, so neither is a tab
-    assert TABS == ["Scenes", "Clock", "MIDI", "Ball"]
+def test_only_the_settings_that_stay_put_are_tabs(cfgwin):
+    # calibration (with the ball's size) is a wizard of its own, the window is positioned with GNOME,
+    # and what is left of the director is set on the main window
+    assert TABS == ["Scenes", "Clock", "MIDI"]
 
 
 def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):
@@ -810,6 +801,29 @@ def test_rows_start_from_the_configured_ball_size_and_back_navigation(cfgwin):
     assert cal.footers.get_visible_child_name() == "1"
 
 
+def test_the_balls_size_seeds_the_pitch_and_is_remembered(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._go(3)
+    assert cal.diameter_step.value == 30 and cal.tile_step.value == 10  # placeholders until they are typed
+    assert cal.rows.pitch == 4.0  # nothing on file: the default pitch, not one derived from the placeholders
+    cal.diameter_step.set_value(50, notify=True)
+    assert cal.rows.pitch == pytest.approx(180 / (3.14159265 * 500 / 20), rel=0.01)  # a 50 cm ball, 10 mm tiles
+    assert last_preview(fake)["rows"]["pitch_deg"] == pytest.approx(cal.rows.pitch)
+    cal.tile_step.set_value(20, notify=True)
+    assert cal.rows.pitch == pytest.approx(2 * 180 / (3.14159265 * 500 / 20), rel=0.01)  # twice the tile, twice the pitch
+    cal._go(4)
+    cal.finish()
+    b = load_config(tmp / "config.yaml").ball
+    assert (b.diameter_cm, b.tile_mm) == (50, 20) and b.row_pitch_deg == pytest.approx(cal.rows.pitch, abs=1e-3)
+    # and a second calibration starts from what was measured
+    w.open_calibration()
+    cal = w.calibration_window
+    cal._go(3)
+    assert cal.diameter_step.value == 50 and cal.tile_step.value == 20
+
+
 def test_every_step_leads_to_the_confirmation_screen(cfgwin):
     w, fake, tmp = cfgwin
     from mirrorballs.control.calibration_model import done_key_to_action, key_to_action, rows_key_to_action
@@ -953,14 +967,3 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         client.close()
         win.destroy()
         rig.close()
-
-
-def test_advanced_calibration_opens_on_the_axis_step(cfgwin):
-    w, fake, _ = cfgwin
-    w.open_config()
-    w.config_dialog.show_tab("Ball")
-    w.open_calibration(step=2)
-    cal = w.calibration_window
-    assert cal.step_no == 2 and cal.pages.get_visible_child_name() == "2" and cal.footers.get_visible_child_name() == "2"
-    assert last_preview(fake)["lines"] is False and last_preview(fake)["crosshair"] is not None
-

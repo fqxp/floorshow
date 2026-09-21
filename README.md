@@ -5,7 +5,8 @@
 > The controller's main window, configuration dialog and calibration are built; the motor is not.
 > Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
 > wizard: the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the tile rows
-> (pitch and offset, checked with a zebra of stripes) and a confirmation step that projects a turning globe.
+> (pitch and offset, checked with a zebra of stripes, starting from the ball's diameter and tile size) and a
+> confirmation step that projects a turning globe.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
 ## The app
