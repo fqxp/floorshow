@@ -12,7 +12,8 @@ TRANSITIONS = [
     ("random", "Random"),
 ]
 LENGTHS = [("¼ bar", 0.25), ("½ bar", 0.5), ("1 bar", 1.0), ("2 bars", 2.0)]
-MAX_HOTKEYS = 8
+HOTKEY_DIGITS = "1234567890"  # scene 10 is on the 0 key, where it sits on the keyboard
+MAX_HOTKEYS = len(HOTKEY_DIGITS)
 
 
 def change_progress(state: dict[str, Any] | None, elapsed_s: float = 0.0) -> float | None:
@@ -123,13 +124,13 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
 
 def hotkeys(scene_ids: list[str], keys: dict[str, str] | None = None) -> dict[str, str]:
     """Scene id -> key label. Explicit ``bindings.keys`` (key -> scene id) win; the remaining scenes
-    get the free digits 1-8 in order."""
+    get the free digits 1-9 and 0 in order."""
     result: dict[str, str] = {}
     for key, target in (keys or {}).items():
         if target in scene_ids and target not in result and key.isdigit():
             result[target] = key
     taken = set(result.values())
-    free = iter(str(n) for n in range(1, MAX_HOTKEYS + 1) if str(n) not in taken)
+    free = iter(d for d in HOTKEY_DIGITS if d not in taken)
     for sid in scene_ids:
         if sid not in result:
             k = next(free, None)
@@ -176,8 +177,8 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
     """Keyboard shortcut (from the design's shortcut sheet) -> (action, argument), or None.
     ``name`` is the GDK key name, e.g. "space", "bracketleft", "1"."""
     if ctrl:
-        return {"Up": ("brightness", +5), "Down": ("brightness", -5), "p": ("preferences", None),
-                "P": ("preferences", None), "b": ("blackout", None), "B": ("blackout", None),
+        return {"Up": ("brightness", +5), "Down": ("brightness", -5), "comma": ("preferences", None),
+                "b": ("blackout", None), "B": ("blackout", None),
                 "q": ("quit", None), "Q": ("quit", None),
                 "question": ("shortcuts", None), "slash": ("shortcuts", None) if shift else None}.get(name)
     if name == "space":
@@ -190,10 +191,14 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
         return ("mode", "manual")
     if name in ("r", "R"):
         return ("mode", "random")
+    if name in ("s", "S"):
+        return ("mode", "sequence")
+    if name in ("c", "C"):
+        return ("clock-source", None)
     if name == "bracketleft":
         return ("step", -1)
     if name == "bracketright":
         return ("step", +1)
-    if len(name) == 1 and name in "12345678":
+    if len(name) == 1 and name in HOTKEY_DIGITS:
         return ("scene-key", name)
     return None

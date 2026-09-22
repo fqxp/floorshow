@@ -63,12 +63,14 @@ def test_banners():
 
 
 def test_hotkeys_digits_in_order_and_explicit_bindings():
-    ids = [f"s{i}" for i in range(10)]
+    ids = [f"s{i}" for i in range(12)]
     hk = hotkeys(ids)
-    assert hk["s0"] == "1" and hk["s7"] == "8" and "s8" not in hk
+    assert hk["s0"] == "1" and hk["s8"] == "9" and hk["s9"] == "0"  # ten scenes, and 10 sits on the 0 key
+    assert "s10" not in hk
     hk = hotkeys(["a", "b", "c"], {"3": "a", "space": "next", "x": "b"})
     assert hk == {"a": "3", "b": "1", "c": "2"}  # explicit digit kept, others fill the free digits
     assert scene_for_key("3", ["a", "b", "c"], {"3": "a"}) == "a"
+    assert scene_for_key("0", [f"s{i}" for i in range(10)]) == "s9"
     assert scene_for_key("9", ["a"]) is None
 
 
@@ -113,11 +115,12 @@ def test_key_to_action_matches_the_shortcut_sheet():
     from mirrorballs.control.viewmodel import key_to_action as k
 
     assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("b", ctrl=True) == ("blackout", None)
-    assert k("m") == ("mode", "manual") and k("r") == ("mode", "random")
+    assert k("m") == ("mode", "manual") and k("r") == ("mode", "random") and k("s") == ("mode", "sequence")
+    assert k("c") == ("clock-source", None)
     assert k("bracketleft") == ("step", -1) and k("bracketright") == ("step", 1)
-    assert k("3") == ("scene-key", "3") and k("9") is None and k("0") is None
+    assert k("3") == ("scene-key", "3") and k("9") == ("scene-key", "9") and k("0") == ("scene-key", "0")
     assert k("Up", ctrl=True) == ("brightness", 5) and k("Down", ctrl=True) == ("brightness", -5)
-    assert k("p", ctrl=True) == ("preferences", None) and k("question", ctrl=True) == ("shortcuts", None)
+    assert k("comma", ctrl=True) == ("preferences", None) and k("question", ctrl=True) == ("shortcuts", None)
     assert k("space", ctrl=True) is None and k("x") is None  # no accidental triggers
 
 

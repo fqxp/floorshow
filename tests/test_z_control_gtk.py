@@ -171,13 +171,46 @@ def test_four_escapes_black_the_show_out(win):
     assert w._on_key(None, Gdk.KEY_b, 0, Gdk.ModifierType(0)) is False  # b alone is no longer a shortcut
 
 
+def test_tap_tempo_belongs_to_the_internal_clock_only(win, tmp_path):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    assert w.tap_btn.get_visible()
+    w.run_action("tap")
+    assert ("tap", {}) in fake.sent
+    fake.sent.clear()
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="X")))
+    assert not w.tap_btn.get_visible()
+    w.run_action("tap")
+    assert not fake.sent  # the MIDI clock owns the tempo
+
+
+def test_the_clock_and_sequence_shortcuts(win, tmp_path):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    w.run_action("mode", "sequence")
+    assert ("mode.set", {"mode": "sequence"}) in fake.sent
+    w.run_action("clock-source")  # no port configured: it says so instead of switching
+    assert w.store.load().clock.source == "internal"
+    w.store.update({"clock": {"midi_port": "X"}})
+    w.cfg = w.store.load()
+    w.refresh()
+    w.run_action("clock-source")
+    assert w.store.load().clock.source == "midi"
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="X")))
+    w._clock_hold = 0.0
+    w.run_action("clock-source")
+    assert w.store.load().clock.source == "internal"
+
+
 def test_the_menu_actions_open_their_dialogs(win):
     w, _ = win
     for name, attr in (("scenes", "scenes_dialog"), ("preferences", "preferences_dialog")):
         w.win_action(name)
         assert getattr(w, attr) is not None
         getattr(w, attr).close()
-    assert w.lookup_action("quit") is not None  # Ctrl+Q, which closes the window and asks about the renderer
+    assert w.lookup_action("quit") is not None  # Ctrl+Q only: quitting is not worth a menu item
     w.show_shortcuts()  # the calibration keys moved out: that window shows them on its own buttons
 
 

@@ -206,7 +206,6 @@ class MainWindow(Adw.ApplicationWindow):
         section = Gio.Menu()
         section.append("Keyboard shortcuts", "win.shortcuts")
         section.append("About Mirrorballs", "win.about")
-        section.append("Quit Mirrorballs", "win.quit")
         menu.append_section(None, section)
         mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         mb.add_css_class("flat-icon")
@@ -452,13 +451,14 @@ class MainWindow(Adw.ApplicationWindow):
         if action == "toggle-run":
             self.act_toggle_run()
         elif action == "tap":
-            self.act_tap()
+            if self.tap_btn.get_visible():  # the tempo is the MIDI clock's to set, not ours
+                self.act_tap()
         elif action == "downbeat":
             self.act_downbeat()
         elif action == "blackout":
             self.blackout_btn.set_active(not self.blackout_btn.get_active())
         elif action == "mode":
-            (self.random_btn if arg == "random" else self.manual_btn).set_active(True)
+            {"random": self.random_btn, "sequence": self.sequence_btn}.get(arg, self.manual_btn).set_active(True)
         elif action == "step":
             self.act_step(arg)
         elif action == "scene-key":
@@ -473,6 +473,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.win_action("shortcuts")
         elif action == "quit":
             self.close()  # asks about the renderer first if the show is live
+        elif action == "clock-source":
+            self.toggle_clock_source()
 
     def _register_actions(self) -> None:
         for name, fn in (
@@ -579,6 +581,15 @@ class MainWindow(Adw.ApplicationWindow):
             self.preferences_dialog.sync_clock_source()
         self.send("reload")
         self.toast("Internal clock." if key == "internal" else f"MIDI clock · {self.cfg.clock.midi_port or 'no port selected'}")
+
+    def toggle_clock_source(self) -> None:
+        """Key C: the other clock. Without a MIDI port there is nothing to switch to, so say so."""
+        if self.clock_seg.selected() == "midi":
+            self.set_clock_source("internal")
+        elif self.clock_seg.buttons["midi"].get_sensitive():
+            self.set_clock_source("midi")
+        else:
+            self.toast("Pick a MIDI port first: Preferences › Clock")
 
     def _sync_clock_seg(self) -> None:
         """Follow the renderer's clock (it is the authority) and keep MIDI out of reach without a port."""
@@ -878,6 +889,7 @@ class MainWindow(Adw.ApplicationWindow):
         internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
         self.source_chip.set_tooltip_text(
             f"{text}\n" + ("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock"))
+        self.tap_btn.set_visible(internal)  # tapping cannot move a clock that another program owns
         set_classes(self.source_chip, {"warn": warn})
         set_classes(self.pips_box, {"dim": st is None})
         self._sync_clock_seg()
@@ -1096,9 +1108,10 @@ class MainWindow(Adw.ApplicationWindow):
         rows = [
             ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]),
                              ("Blackout", ["Ctrl", "B"]), ("Blackout in a panic", ["Esc"] * vm.PANIC_ESCAPES),
-                             ("Scene 1–8", ["1", "…", "8"]), ("Previous / next scene", ["[", "]"]),
-                             ("Manual / Random", ["M", "R"]), ("Brightness", ["Ctrl", "↑↓"]),
-                             ("Preferences", ["Ctrl", "P"]), ("Shortcuts", ["Ctrl", "?"]),
+                             ("Internal / MIDI clock", ["C"]),
+                             ("Scene 1–10", ["1", "…", "9", "0"]), ("Previous / next scene", ["[", "]"]),
+                             ("Manual / Random / Sequence", ["M", "R", "S"]), ("Brightness", ["Ctrl", "↑↓"]),
+                             ("Preferences", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"]),
                              ("Quit Mirrorballs", ["Ctrl", "Q"])]),
         ]
         cols = hbox(32, margin_top=18, margin_bottom=18, margin_start=24, margin_end=24)
