@@ -1,4 +1,4 @@
-"""Pure helpers behind the configuration dialog and the calibration wizard (no GTK)."""
+"""Pure helpers behind the preferences dialog and the calibration wizard (no GTK)."""
 
 from __future__ import annotations
 

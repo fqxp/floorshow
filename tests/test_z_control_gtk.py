@@ -155,6 +155,32 @@ def test_commands_sent_by_the_ui(win):
     assert len(fake.sent) == n
 
 
+def test_four_escapes_black_the_show_out(win):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    esc = lambda: w._on_key(None, Gdk.KEY_Escape, 0, Gdk.ModifierType(0))
+    assert [esc() for _ in range(3)] == [False] * 3  # a stray Escape does nothing at all
+    assert not w.blackout_btn.get_active()
+    assert esc() is True
+    assert w.blackout_btn.get_active()
+    # and Ctrl+B does the same in one press
+    w.blackout_btn.set_active(False)
+    assert w._on_key(None, Gdk.KEY_b, 0, Gdk.ModifierType.CONTROL_MASK) is True
+    assert w.blackout_btn.get_active()
+    assert w._on_key(None, Gdk.KEY_b, 0, Gdk.ModifierType(0)) is False  # b alone is no longer a shortcut
+
+
+def test_the_menu_actions_open_their_dialogs(win):
+    w, _ = win
+    for name, attr in (("scenes", "scenes_dialog"), ("preferences", "preferences_dialog")):
+        w.win_action(name)
+        assert getattr(w, attr) is not None
+        getattr(w, attr).close()
+    assert w.lookup_action("quit") is not None  # Ctrl+Q, which closes the window and asks about the renderer
+    w.show_shortcuts()  # the calibration keys moved out: that window shows them on its own buttons
+
+
 def test_quit_renderer_is_disabled_while_no_renderer_runs(win):
     w, _ = win
     assert not w.lookup_action("quit-renderer").get_enabled()
@@ -431,7 +457,7 @@ def test_client_talks_to_a_live_renderer(app, tmp_path):
 # --- configuration dialog and calibration window ---------------------------------------------
 
 from mirrorballs.common import paths  # noqa: E402
-from mirrorballs.control.config_dialog import TABS  # noqa: E402
+from mirrorballs.control.preferences import TABS  # noqa: E402
 
 
 @pytest.fixture
@@ -446,7 +472,7 @@ def cfgwin(app, tmp_path, monkeypatch):
     w.apply_state(st(window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1")))
     pump(150)
     yield w, fake, tmp_path
-    for x in (w.config_dialog, w.calibration_window):
+    for x in (w.preferences_dialog, w.scenes_dialog, w.calibration_window):
         if x:
             x.destroy()
     w.destroy()
@@ -454,8 +480,8 @@ def cfgwin(app, tmp_path, monkeypatch):
 
 def test_clock_and_timing_settings_are_saved_and_the_renderer_reloads(cfgwin):
     w, fake, tmp = cfgwin
-    w.open_config()
-    d = w.config_dialog
+    w.open_preferences()
+    d = w.preferences_dialog
     d.clock_seg.select("internal")
     d._on_clock_source("internal")
     d.bpm_entry.set_text("128")
@@ -473,8 +499,8 @@ def test_clock_and_timing_settings_are_saved_and_the_renderer_reloads(cfgwin):
 
 def test_beat_note_settings_default_to_mixxx_and_are_saved(cfgwin):
     w, fake, tmp = cfgwin
-    w.open_config()
-    d = w.config_dialog
+    w.open_preferences()
+    d = w.preferences_dialog
     assert not d.beat_group.get_visible()  # only in beat-notes mode
     assert (d.beat_note.value, d.beat_velocity.value, d.midi_channel.value, d.tempo_note.value, d.tempo_offset.value) == (50, 100, 0, 52, 50)
     d.midi_mode_seg.select("beats")
@@ -504,8 +530,8 @@ def test_detect_fills_in_the_beat_note_from_the_first_note(cfgwin):
     w, fake, tmp = cfgwin
     w.set_connection(True)
     w.apply_state(st())
-    w.open_config()
-    d = w.config_dialog
+    w.open_preferences()
+    d = w.preferences_dialog
     d._toggle_detect()
     assert fake.sent[-1] == ("midi.learn", {"on": True, "role": "clock"}) and d.detecting
     d.on_event({"event": "midi_learned", "role": "control", "on": {"note": 1, "ch": 1}})  # not for us
@@ -519,8 +545,8 @@ def test_detect_fills_in_the_beat_note_from_the_first_note(cfgwin):
 
 def test_the_port_list_starts_on_a_placeholder_while_no_port_is_saved(cfgwin):
     w, _, _ = cfgwin
-    w.open_config()
-    d = w.config_dialog
+    w.open_preferences()
+    d = w.preferences_dialog
     d._ports = ["Midi Through 14:0", "Mixxx 130:0"]
     d._fill_ports()
     assert d.port_dd.get_model().get_string(0) == "Select a port…" and d.port_dd.get_selected() == 0
@@ -533,8 +559,8 @@ def test_the_port_list_starts_on_a_placeholder_while_no_port_is_saved(cfgwin):
 
 def test_midi_mapping_learn_flow(cfgwin):
     w, fake, tmp = cfgwin
-    w.open_config()
-    d = w.config_dialog
+    w.open_preferences()
+    d = w.preferences_dialog
     d._add_mapping()  # starts listening because a control port is configured and the renderer is connected
     assert d.learn_row == 0 and d.learn_bar.get_visible() and ("midi.learn", {"on": True}) in fake.sent
     w.apply_event({"event": "midi_learned", "on": {"note": 36, "ch": 10}})
@@ -549,9 +575,9 @@ def test_midi_mapping_learn_flow(cfgwin):
 
 
 def test_only_the_settings_that_stay_put_are_tabs(cfgwin):
-    # calibration (with the ball's size) is a wizard of its own, the window is positioned with GNOME,
+    # scenes and calibration are dialogs of their own, the window is positioned with GNOME,
     # and what is left of the director is set on the main window
-    assert TABS == ["Scenes", "Clock", "MIDI"]
+    assert TABS == ["Clock", "MIDI"]
 
 
 def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):
@@ -563,8 +589,8 @@ def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):
 
 def test_scene_file_operations(cfgwin):
     w, fake, tmp = cfgwin
-    w.open_config()
-    d = w.config_dialog
+    w.open_scenes()
+    d = w.scenes_dialog
     d._do_add("Fresh One")
     assert d.selected_scene == "fresh-one" and "fresh-one" in w.library.scenes and d._is_user("fresh-one")
     assert d.rename_btn.get_sensitive() and d.delete_btn.get_sensitive()

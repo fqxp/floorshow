@@ -117,7 +117,7 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
                           f"MIDI clock lost. Holding the last tempo ({clock['bpm']:.0f} BPM).", "Use internal clock"))
     for sid, problems in state.get("scene_errors", {}).items():
         out.append(Banner("scene_error", "File error", f"{sid}.yaml · {problems[0]}", "Open in editor", scene_id=sid))
-        break  # one banner at a time; the config dialog lists all of them
+        break  # one banner at a time; the scenes dialog lists all of them
     return out
 
 
@@ -157,11 +157,28 @@ def display_name(scene_id: str) -> str:
     return scene_id.replace("-", " ").replace("_", " ").title()
 
 
+PANIC_ESCAPES = 4  # Escape presses that black the show out
+PANIC_WINDOW_S = 2.0  # ... when they all land within this long
+
+
+def panic_press(times: list[float], now: float) -> bool:
+    """Record an Escape press in ``times`` and say whether the panic blackout fires. Escape alone does
+    nothing, so a stray press cannot kill the show; four in a row is unmistakably deliberate."""
+    times.append(now)
+    del times[: max(0, len(times) - PANIC_ESCAPES)]
+    if len(times) == PANIC_ESCAPES and now - times[0] <= PANIC_WINDOW_S:
+        times.clear()
+        return True
+    return False
+
+
 def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[str, Any] | None:
     """Keyboard shortcut (from the design's shortcut sheet) -> (action, argument), or None.
     ``name`` is the GDK key name, e.g. "space", "bracketleft", "1"."""
     if ctrl:
-        return {"Up": ("brightness", +5), "Down": ("brightness", -5), "comma": ("config", None),
+        return {"Up": ("brightness", +5), "Down": ("brightness", -5), "p": ("preferences", None),
+                "P": ("preferences", None), "b": ("blackout", None), "B": ("blackout", None),
+                "q": ("quit", None), "Q": ("quit", None),
                 "question": ("shortcuts", None), "slash": ("shortcuts", None) if shift else None}.get(name)
     if name == "space":
         return ("toggle-run", None)
@@ -169,8 +186,6 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
         return ("tap", None)
     if name in ("d", "D"):
         return ("downbeat", None)
-    if name in ("b", "B"):
-        return ("blackout", None)
     if name in ("m", "M"):
         return ("mode", "manual")
     if name in ("r", "R"):

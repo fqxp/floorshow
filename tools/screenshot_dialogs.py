@@ -68,7 +68,7 @@ def clock(**kw):
 
 def state(ids, **kw):
     s = dict(event="state", clock=clock(), scene=ids[0], scenes=ids, running=True, mode="manual", every_beats=32, master=0.85,
-             params={}, calibrating=False, test_pattern=False, learning=False, sequence_index=None, fps=60.0, scene_errors={},
+             params={}, calibrating=False, test_pattern=False, learning=False, fps=60.0, scene_errors={},
              config_error=None, midi={}, window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1"))
     s.update(kw)
     return s
@@ -90,9 +90,7 @@ def on_activate(app):
         "calibration: {left: 0.3, right: 0.7, top: 0.14, bottom: 0.86, calibrated_at: '" + time.strftime("%Y-%m-%dT%H:%M") + "'}\n"
         "ball: {diameter_cm: 30, tile_mm: 10, row_pitch_deg: 3.83}\n"
         "midi:\n  control_port: Arturia BeatStep\n  map:\n    - {on: {note: 36}, do: {scene: bars-to-poles}}\n"
-        "    - {on: {note: 38}, do: {scene: ripples}}\n    - {on: {cc: 7}, do: master}\n    - {on: {note: 32}, do: blackout}\n"
-        "director:\n  pool: {tags: [bars]}\n  sequence:\n    - {scene: bars-to-poles, bars: 8}\n    - {scene: ripples, bars: 4}\n"
-        "    - {scene: kick-spot, bars: 16}\n")
+        "    - {on: {note: 38}, do: {scene: ripples}}\n    - {on: {cc: 7}, do: master}\n    - {on: {note: 32}, do: blackout}\n")
     fake = Fake()
     lib = Library([scenes])
     win = MainWindow(app, fake, lib, ConfigStore(TMP / "config.yaml"))
@@ -103,18 +101,23 @@ def on_activate(app):
     win.apply_state(state(ids))
     pump(300)
 
-    win.open_config()
-    dlg = win.config_dialog
-    for tab in ("Scenes", "Clock", "Output", "MIDI", "Director", "Calibration", "Ball"):
+    win.open_scenes()
+    shot(win.scenes_dialog, "scenes")
+    win.scenes_dialog.close()
+    pump(200)
+
+    win.open_preferences()
+    dlg = win.preferences_dialog
+    for tab in ("Clock", "MIDI"):
         dlg.show_tab(tab)
-        shot(dlg, f"config_{tab.lower()}")
+        shot(dlg, f"prefs_{tab.lower()}")
     dlg.show_tab("Clock")
     dlg.clock_seg.select("internal")
     dlg._on_clock_source("internal")
-    shot(dlg, "config_clock_internal")
+    shot(dlg, "prefs_clock_internal")
     dlg.show_tab("MIDI")
     dlg._start_learning(2)
-    shot(dlg, "config_midi_learning")
+    shot(dlg, "prefs_midi_learning")
     dlg._flush()
     dlg.close()
     pump(200)

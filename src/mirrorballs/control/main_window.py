@@ -168,7 +168,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._scroll_acc = 0.0
         self._tap_timer = 0
         self._quit_asked = False
-        self.config_dialog: Any = None
+        self._escapes: list[float] = []  # recent Escape presses (the panic blackout)
+        self.preferences_dialog: Any = None
+        self.scenes_dialog: Any = None
         self.calibration_window: Any = None
 
         cfg = store.load()
@@ -197,12 +199,14 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_start(self.conn_chip["box"])
         header.set_title_widget(label("Mirrorballs", "title-label"))
         menu = Gio.Menu()
+        menu.append("Scenes…", "win.scenes")
         menu.append("Calibration…", "win.calibration")
-        menu.append("Configuration…", "win.config")
+        menu.append("Preferences…", "win.preferences")
         menu.append("Quit renderer", "win.quit-renderer")
         section = Gio.Menu()
         section.append("Keyboard shortcuts", "win.shortcuts")
         section.append("About Mirrorballs", "win.about")
+        section.append("Quit Mirrorballs", "win.quit")
         menu.append_section(None, section)
         mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         mb.add_css_class("flat-icon")
@@ -353,7 +357,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._fill_empty(
             self.empty_scenes, "view-grid-symbolic", "No scenes yet",
             "Add a scene to get started. Scenes are small files you can edit in any text editor.",
-            [("Add scene…", lambda: self.open_config("Scenes")), ("Reveal folder", self.act_reveal_folder)],
+            [("Add scene…", self.open_scenes), ("Reveal folder", self.act_reveal_folder)],
         )
         self.scene_stack = Gtk.Stack(vexpand=True)
         self.scene_stack.add_named(scroller, "grid")
@@ -431,6 +435,11 @@ class MainWindow(Adw.ApplicationWindow):
         shift = bool(mods & Gdk.ModifierType.SHIFT_MASK)
         if mods & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
             return False
+        if name == "Escape":
+            if not vm.panic_press(self._escapes, time.monotonic()):
+                return False
+            self.run_action("blackout")
+            return True
         hit = vm.key_to_action(name, ctrl, shift)
         if hit is None:
             return False
@@ -458,15 +467,19 @@ class MainWindow(Adw.ApplicationWindow):
                 self.act_scene(sid)
         elif action == "brightness":
             self.brightness.set_value(min(100, max(0, self.brightness.get_value() + arg)))
-        elif action == "config":
-            self.win_action("config")
+        elif action == "preferences":
+            self.win_action("preferences")
         elif action == "shortcuts":
             self.win_action("shortcuts")
+        elif action == "quit":
+            self.close()  # asks about the renderer first if the show is live
 
     def _register_actions(self) -> None:
         for name, fn in (
-            ("config", lambda *_: self.open_config()),
+            ("preferences", lambda *_: self.open_preferences()),
+            ("scenes", lambda *_: self.open_scenes()),
             ("calibration", lambda *_: self.open_calibration()),
+            ("quit", lambda *_: self.close()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
             ("shortcuts", lambda *_: self.show_shortcuts()),
             ("about", lambda *_: self.show_about()),
@@ -562,8 +575,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self.cfg = self.store.load()
         self._clock_hold, self._clock_target = time.monotonic() + CLOCK_HOLD_S, key
-        if self.config_dialog:
-            self.config_dialog.sync_clock_source()
+        if self.preferences_dialog:
+            self.preferences_dialog.sync_clock_source()
         self.send("reload")
         self.toast("Internal clock." if key == "internal" else f"MIDI clock · {self.cfg.clock.midi_port or 'no port selected'}")
 
@@ -577,7 +590,7 @@ class MainWindow(Adw.ApplicationWindow):
         has_port = bool(self.cfg.clock.midi_port)
         self.clock_seg.buttons["midi"].set_sensitive(has_port)
         self.clock_seg.buttons["midi"].set_tooltip_text(
-            None if has_port else "Pick a MIDI port first: Configuration › Clock")
+            None if has_port else "Pick a MIDI port first: Preferences › Clock")
 
     def act_downbeat(self) -> None:
         self.send("sync_downbeat")
@@ -646,14 +659,21 @@ class MainWindow(Adw.ApplicationWindow):
             self.send("quit")
         self.close()
 
-    def open_config(self, tab: str | None = None) -> None:
-        from .config_dialog import ConfigDialog
+    def open_preferences(self, tab: str | None = None) -> None:
+        from .preferences import PreferencesDialog
 
-        if self.config_dialog is None:
-            self.config_dialog = ConfigDialog(self)
+        if self.preferences_dialog is None:
+            self.preferences_dialog = PreferencesDialog(self)
         if tab:
-            self.config_dialog.show_tab(tab)
-        self.config_dialog.present()
+            self.preferences_dialog.show_tab(tab)
+        self.preferences_dialog.present()
+
+    def open_scenes(self) -> None:
+        from .scenes_dialog import ScenesDialog
+
+        if self.scenes_dialog is None:
+            self.scenes_dialog = ScenesDialog(self)
+        self.scenes_dialog.present()
 
     def open_calibration(self) -> None:
         from .calibration import CalibrationWindow
@@ -766,7 +786,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._restart_pending = False
                 GLib.timeout_add(RESTART_DELAY_MS, lambda: self.start_renderer() or False)
         self.refresh()
-        for w in (self.config_dialog, self.calibration_window):
+        for w in (self.preferences_dialog, self.calibration_window):
             if w:
                 w.on_connection(up)
 
@@ -789,13 +809,13 @@ class MainWindow(Adw.ApplicationWindow):
         if changed or key != self._view_key:
             self._view_key = key
             self.refresh()
-        for w in (self.config_dialog, self.calibration_window):
+        for w in (self.preferences_dialog, self.calibration_window):
             if w:
                 w.on_state(state)
 
     def apply_event(self, ev: dict[str, Any]) -> None:
-        if self.config_dialog:
-            self.config_dialog.on_event(ev)
+        if self.preferences_dialog:
+            self.preferences_dialog.on_event(ev)
 
     # --- rendering -----------------------------------------------------------------------
 
@@ -1072,15 +1092,14 @@ class MainWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def show_shortcuts(self) -> None:
+        # The calibration keys are not listed: that window shows every one of them on its own buttons.
         rows = [
-            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]), ("Blackout", ["B"]),
+            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]),
+                             ("Blackout", ["Ctrl", "B"]), ("Blackout in a panic", ["Esc"] * vm.PANIC_ESCAPES),
                              ("Scene 1–8", ["1", "…", "8"]), ("Previous / next scene", ["[", "]"]),
                              ("Manual / Random", ["M", "R"]), ("Brightness", ["Ctrl", "↑↓"]),
-                             ("Configuration", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"])]),
-            ("Calibration", [("Left line", ["A", "D"]), ("Right line", ["J", "L"]), ("Top line", ["W", "S"]),
-                             ("Bottom line", ["I", "K"]), ("Move ball", ["←", "↑", "↓", "→"]), ("Grow / shrink", ["+", "−"]),
-                             ("Step", ["1", "2", "3"]), ("Blink / grid", ["B", "G"]), ("Cancel", ["Esc"]),
-                             ("Next step", ["Enter"]), ("Back a step", ["⌫"])]),
+                             ("Preferences", ["Ctrl", "P"]), ("Shortcuts", ["Ctrl", "?"]),
+                             ("Quit Mirrorballs", ["Ctrl", "Q"])]),
         ]
         cols = hbox(32, margin_top=18, margin_bottom=18, margin_start=24, margin_end=24)
         for title, items in rows:
@@ -1089,7 +1108,7 @@ class MainWindow(Adw.ApplicationWindow):
             for name, keys in items:
                 col.append(hbox(8, label(name, hexpand=True), *[kbd(k) for k in keys]))
             cols.append(col)
-        dlg = Adw.Dialog(title="Keyboard shortcuts", content_width=640)
+        dlg = Adw.Dialog(title="Keyboard shortcuts", content_width=420)
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         view.set_content(cols)

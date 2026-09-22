@@ -98,15 +98,26 @@ def test_tokens_and_css():
     assert tokens.beat_intensity(0.5) < 0.5 and tokens.beat_intensity(1.7) == 0.0
 
 
+def test_the_panic_blackout_needs_four_escapes_in_a_row():
+    from mirrorballs.control.viewmodel import panic_press
+
+    t: list[float] = []
+    assert [panic_press(t, x) for x in (0.0, 0.3, 0.6, 0.9)] == [False, False, False, True]
+    assert t == []  # and it starts over, so holding Escape does not toggle the blackout back
+    assert [panic_press(t, x) for x in (2.0, 3.0, 4.0, 5.0)] == [False] * 4  # a second apart: not a panic
+    assert panic_press(t, 5.2) is False  # the press at 3.0 is still in the window of four
+    assert panic_press(t, 5.4) is True  # 4.0 to 5.4 is inside it
+
+
 def test_key_to_action_matches_the_shortcut_sheet():
     from mirrorballs.control.viewmodel import key_to_action as k
 
-    assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("B") == ("blackout", None)
+    assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("b", ctrl=True) == ("blackout", None)
     assert k("m") == ("mode", "manual") and k("r") == ("mode", "random")
     assert k("bracketleft") == ("step", -1) and k("bracketright") == ("step", 1)
     assert k("3") == ("scene-key", "3") and k("9") is None and k("0") is None
     assert k("Up", ctrl=True) == ("brightness", 5) and k("Down", ctrl=True) == ("brightness", -5)
-    assert k("comma", ctrl=True) == ("config", None) and k("question", ctrl=True) == ("shortcuts", None)
+    assert k("p", ctrl=True) == ("preferences", None) and k("question", ctrl=True) == ("shortcuts", None)
     assert k("space", ctrl=True) is None and k("x") is None  # no accidental triggers
 
 

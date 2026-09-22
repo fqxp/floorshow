@@ -1,4 +1,4 @@
-"""Small GTK building blocks shared by the main window, the configuration dialog and the calibration
+"""Small GTK building blocks shared by the main window, the preferences dialog and the calibration
 window. Everything is styled by style.css (design tokens)."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Scene file operations for the configuration dialog: create, duplicate, rename, delete.
+"""Scene file operations for the scenes dialog: create, duplicate, rename, delete.
 
 Files are edited with a round-trip YAML loader so a user's comments and layout survive a rename.
 A duplicated bundled scene gets absolute asset paths, because its relative ones (``../assets/x.jpg``)

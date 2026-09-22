@@ -2,7 +2,7 @@
 
 > **Work in progress: the app.** The demo below is being turned into a two-process app: a
 > projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
-> The controller's main window, configuration dialog and calibration are built; the motor is not.
+> The controller's main window, its scenes and preferences dialogs and calibration are built; the motor is not.
 > Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
 > wizard: the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the tile rows
 > (pitch and offset, checked with a zebra of stripes, starting from the ball's diameter and tile size) and a
@@ -36,7 +36,7 @@ Config lives in `~/.config/mirrorballs/config.yaml`, scenes in `~/.config/mirror
 **Beat notes instead of MIDI clock.** Mixxx sends no MIDI clock. Its
 [MIDI for light](https://github.com/mixxxdj/mixxx/wiki/MIDI%20clock%20output) script sends a note on every beat
 instead (D, velocity 100) and the tempo as a second note (E, value = BPM - 50). Use that with
-(Configuration > Clock > Beat signal > Beat notes):
+(Preferences > Clock > Beat signal > Beat notes):
 
 ```yaml
 clock:
@@ -51,7 +51,7 @@ clock:
 ```
 
 If the beat does not arrive, check what is sent with `aseqdump -l` / `aseqdump -p <port>`, or click **Detect** next to
-the beat note in Configuration > Clock: the first note that arrives fills in note, velocity and channel.
+the beat note in Preferences > Clock: the first note that arrives fills in note, velocity and channel.
 
 **VirMIDI.** If Mixxx's output device is a "VirMIDI" port (Mixxx offers nothing else on some systems), what it
 sends appears only on the matching *raw* device, which a sequencer client cannot subscribe to. Pick the entry
