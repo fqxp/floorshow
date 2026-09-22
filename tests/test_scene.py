@@ -187,3 +187,13 @@ def test_colour_and_bool_params_reach_expressions():
     assert s.alpha == 1.0
     s2 = sc.evaluate(env(params={"tint": [0.0, 0.0, 1.0], "on": False}))[0]
     assert s2.color == pytest.approx((0.5, 0.5, 1.0)) and s2.alpha == 0.0
+
+
+def test_the_scene_spin_is_outside_any_repeat(tmp_path):
+    """i and n belong to a layer's repeat; the spin is evaluated once per frame, so it cannot use them.
+    Rejecting it at load time is what keeps that from being a NameError while the show runs."""
+    with pytest.raises(SceneError) as e:
+        load_scene_text("schema: 1\nname: x\nspin: {axis: y, deg: 'i * 10'}\nlayers:\n  - {type: fill}\n", "x", tmp_path)
+    assert "spin.deg: unknown name 'i'" in str(e.value)
+    sc = load_scene_text("schema: 1\nname: x\nspin: {axis: y, deg: 'fract(bar) * 360'}\nlayers:\n  - {type: fill}\n", "x", tmp_path)
+    assert sc.spin(env(beat=2.0))[0] == "y"

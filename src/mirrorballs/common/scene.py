@@ -484,7 +484,8 @@ def compile_scene(model: SceneFile, scene_id: str, base_dir: Path, source: Path 
         asset_paths.append(str(path))
 
     layers = [c.layer(i, m, asset_order) for i, m in enumerate(model.layers)]
-    spin_deg = c.expr(model.spin.deg, "spin.deg") if model.spin else None
+    # the whole-scene spin is evaluated once per frame, outside any repeat, so i and n do not exist there
+    spin_deg = c.expr(model.spin.deg, "spin.deg", extra_vars=()) if model.spin else None
 
     if c.problems:
         raise SceneError(str(source or scene_id), c.problems)

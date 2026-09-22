@@ -124,3 +124,11 @@ def test_runtime_errors_never_raise(src):
 def test_pow_bomb_is_harmless():
     e = compile_expr("9 ** 9 ** 9 ** 9", variables=list(ENV))
     assert e(ENV) == 0.0
+
+
+def test_a_missing_variable_yields_zero_instead_of_crashing():
+    """The renderer evaluates scenes every frame; a name the environment happens not to provide must
+    behave like any other runtime error, not take the show down."""
+    e = compile_expr("beat * 2", variables=("beat",))
+    assert e({}) == 0.0 and "beat" in (e.last_error or "")
+    assert e({"beat": 3.0}) == 6.0

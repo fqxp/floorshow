@@ -323,11 +323,12 @@ class Expr:
         self.last_error: str | None = None
 
     def __call__(self, env: Mapping[str, Any]) -> Value:
-        """Evaluate. A runtime math error (division by zero, sqrt of a negative, ...) yields 0.0
-        and is recorded in ``last_error``, so one bad scene can never crash the renderer."""
+        """Evaluate. A runtime error (division by zero, sqrt of a negative, a variable this
+        environment does not provide) yields 0.0 and is recorded in ``last_error``, so one bad
+        scene can never crash the renderer."""
         try:
             result = eval(self._code, _GLOBALS, env)  # noqa: S307
-        except (ArithmeticError, ValueError, TypeError) as e:
+        except (ArithmeticError, ValueError, TypeError, NameError) as e:
             self.last_error = f"{self.source!r}: {e}"
             return 0.0
         if isinstance(result, (float, tuple)):

@@ -9,6 +9,9 @@
 > confirmation step that projects a turning globe.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
+**Writing scenes:** [docs/scenes-tutorial.md](docs/scenes-tutorial.md) is a worked introduction,
+[docs/scenes-reference.md](docs/scenes-reference.md) lists every key, variable and function.
+
 ## The app
 
 ```sh
