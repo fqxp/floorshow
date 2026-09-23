@@ -46,6 +46,9 @@ class BallConfig(_Base):
     tile_mm: float | None = Field(None, gt=0)  # starting value for calibration (with diameter_cm)
     row_pitch_deg: float | None = Field(None, gt=0)  # None: rows uncalibrated, tile = 4 deg, no snapping
     row_offset_deg: float = 0.0
+    # Signed: + turns to the right as seen facing the ball, 0 = not turning. Nothing reads this yet; it is
+    # what the later rotation feature needs to know about the rig, asked while the rest of it is measured.
+    rotation_rpm: float = Field(0.0, ge=-60, le=60)
     motor: dict[str, Any] | None = None  # reserved
 
 

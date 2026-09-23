@@ -25,13 +25,16 @@ from ..common.geometry import Calibration, ball_to_image  # noqa: E402
 from . import config_model as cm  # noqa: E402
 from . import tokens  # noqa: E402
 from .calibration_model import (  # noqa: E402
-    DEFAULT_PITCH, DEFAULT_SIZE, AxisSession, RowsSession, Session, axis_key_to_action, done_key_to_action, fmt_px,
-    key_to_action, rows_key_to_action,
+    DEFAULT_PITCH, DEFAULT_SIZE, STEP_AXIS, STEP_BALL, STEP_DONE, STEP_ROWS, STEP_SILHOUETTE, AxisSession, RowsSession,
+    Session, axis_key_to_action, ball_key_to_action, done_key_to_action, fmt_px, key_to_action, rows_key_to_action,
 )
-from .widgets import Segmented, Stepper, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
+from .widgets import (  # noqa: E402
+    Segmented, SettingsGroup, Stepper, hbox, icon, kbd, label, push_button, set_classes, setting_row, vbox,
+)
 
 BEGIN_TIMEOUT_S = 1.5  # wait this long for the renderer to report its window size before assuming 1920x1080
 SPIN_DPS, SPIN_TICK_MS = 24.0, 50  # the confirmation globe turns at the renderer's rate (core.CAL_SPIN_DPS)
+DEFAULT_DIAMETER_CM, DEFAULT_TILE_MM, DEFAULT_RPM = 30.0, 10.0, 1.5  # what step 1 offers before anything is measured
 
 
 class Diagram(Gtk.DrawingArea):
@@ -182,7 +185,7 @@ class CalibrationWindow(Adw.Window):
         self.session: Session | None = None
         self.axis: AxisSession | None = None
         self.rows: RowsSession | None = None
-        self.step_no = 1
+        self.step_no = STEP_BALL
         self.rows_cleared = False  # step 3 was reset to defaults: the saved row grid is dropped
         self.begun = False
         self._begin_deadline = 0.0
@@ -209,8 +212,8 @@ class CalibrationWindow(Adw.Window):
 
         self.steps = hbox(8, halign=Gtk.Align.CENTER, margin_top=12)
         self.step_pills: list[Gtk.Box] = []
-        for n, (name, optional) in enumerate((("Silhouette", False), ("Ball axis", True), ("Tile rows", True),
-                                              ("Confirm", False)), start=1):
+        for n, (name, optional) in enumerate((("Ball", False), ("Silhouette", False), ("Ball axis", True),
+                                              ("Tile rows", True), ("Confirm", False)), start=1):
             pill = hbox(8, label(str(n), "pip", xalign=0.5), label(name, hexpand=False))
             if optional:
                 pill.append(label("optional", "hint"))
@@ -221,7 +224,7 @@ class CalibrationWindow(Adw.Window):
         self.banner_box = vbox(0)
         view.add_top_bar(self.banner_box)
 
-        self.instruction = label("Move each line until it just touches the edge of the ball.", "secondary", xalign=0.5, wrap=True)
+        self.instruction = label(self.INSTRUCTIONS[STEP_BALL], "secondary", xalign=0.5, wrap=True)
         self.diagram = Diagram()
         self.blink_btn = Gtk.ToggleButton()
         self.grid_btn = Gtk.ToggleButton()
@@ -282,10 +285,11 @@ class CalibrationWindow(Adw.Window):
         body = hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
 
         self.pages = Gtk.Stack(vexpand=True)
-        self.pages.add_named(body, "1")
-        self.pages.add_named(self._build_axis_page(), "2")
-        self.pages.add_named(self._build_rows_page(), "3")
-        self.pages.add_named(self._build_done_page(), "4")
+        self.pages.add_named(self._build_ball_page(), str(STEP_BALL))
+        self.pages.add_named(body, str(STEP_SILHOUETTE))
+        self.pages.add_named(self._build_axis_page(), str(STEP_AXIS))
+        self.pages.add_named(self._build_rows_page(), str(STEP_ROWS))
+        self.pages.add_named(self._build_done_page(), str(STEP_DONE))
 
         def cancel_btn() -> Gtk.Button:
             b = push_button("Cancel", "tall", kbd_text="Esc")
@@ -310,21 +314,65 @@ class CalibrationWindow(Adw.Window):
             return b
 
         # Every step but the last ends in Next, so the wizard always runs to the confirmation screen.
-        self.next1_btn, self.next_btn, self.next3_btn = next_btn(2), next_btn(3), next_btn(4)
-        self.reset_btns = {step: reset_btn(step) for step in (1, 2, 3)}
-        self.reset_btn = self.reset_btns[1]
+        self.next_btns = {step: next_btn(step + 1) for step in (STEP_BALL, STEP_SILHOUETTE, STEP_AXIS, STEP_ROWS)}
+        self.reset_btns = {step: reset_btn(step) for step in (STEP_BALL, STEP_SILHOUETTE, STEP_AXIS, STEP_ROWS)}
         self.finish_btn = push_button("Finish", "tall", "primary", kbd_text="Enter")
         self.finish_btn.add_css_class("on-accent")
         self.finish_btn.connect("clicked", lambda *_: self.finish())
         self.footers = Gtk.Stack()
         pad = dict(margin_start=24, margin_end=24, margin_top=8, margin_bottom=16)
-        self.footers.add_named(hbox(8, self.reset_btns[1], Gtk.Box(hexpand=True), cancel_btn(), self.next1_btn, **pad), "1")
-        self.footers.add_named(hbox(8, back_btn(1), self.reset_btns[2], Gtk.Box(hexpand=True), cancel_btn(),
-                                    self.next_btn, **pad), "2")
-        self.footers.add_named(hbox(8, back_btn(2), self.reset_btns[3], Gtk.Box(hexpand=True), cancel_btn(),
-                                    self.next3_btn, **pad), "3")
-        self.footers.add_named(hbox(8, back_btn(3), Gtk.Box(hexpand=True), cancel_btn(), self.finish_btn, **pad), "4")
+        self.footers.add_named(hbox(8, self.reset_btns[STEP_BALL], Gtk.Box(hexpand=True), cancel_btn(),
+                                    self.next_btns[STEP_BALL], **pad), str(STEP_BALL))
+        for step in (STEP_SILHOUETTE, STEP_AXIS, STEP_ROWS):
+            self.footers.add_named(hbox(8, back_btn(step - 1), self.reset_btns[step], Gtk.Box(hexpand=True),
+                                        cancel_btn(), self.next_btns[step], **pad), str(step))
+        self.footers.add_named(hbox(8, back_btn(STEP_ROWS), Gtk.Box(hexpand=True), cancel_btn(), self.finish_btn,
+                                    **pad), str(STEP_DONE))
         view.set_content(vbox(8, self.instruction, self.pages, self.footers, margin_top=8))
+
+    def _build_ball_page(self) -> Gtk.Widget:
+        """Step 1: what we know about the rig before the projector comes into it. Nothing here is measured
+        by the wizard, and nothing here has to be right: it only gives the later steps somewhere to start."""
+        b = self.main.store.load().ball
+        self.ball_saved = bool(b.diameter_cm and b.tile_mm)
+        self.ball_diameter = b.diameter_cm or DEFAULT_DIAMETER_CM
+        self.ball_tile = b.tile_mm or DEFAULT_TILE_MM
+        self.ball_rotation_rpm = b.rotation_rpm
+        self._ball_initial = (self.ball_diameter, self.ball_tile, self.ball_rotation_rpm)
+        self.diameter_step = Stepper(self.ball_diameter, 5, 200, 1, lambda v: f"<b>{v:.0f}</b> cm",
+                                     lambda v: self._ball_changed(diameter=v), width=140)
+        self.tile_step = Stepper(self.ball_tile, 2, 50, 1, lambda v: f"<b>{v:.0f}</b> mm",
+                                 lambda v: self._ball_changed(tile=v), width=140)
+        self.rows_hint = label("", "secondary")
+        self.rotation_seg = Segmented([("still", "Still"), ("right", "Turns right"), ("left", "Turns left")],
+                                      self._rotation_key(), lambda k: self._ball_changed(direction=k))
+        self.speed_step = Stepper(abs(self.ball_rotation_rpm) or DEFAULT_RPM, 0.1, 20, 0.1,
+                                  lambda v: f"<b>{v:.1f}</b> rpm", lambda v: self._ball_changed(rpm=v), width=140)
+        self.speed_hint = label("", "secondary")
+
+        intro = label("Rough values are enough. Nothing on this page has to be exact \u2014 it only gives the steps "
+                      "that follow somewhere to start, and you refine them there by looking at the real ball.",
+                      "secondary", wrap=True)
+        size = SettingsGroup("The ball")
+        size.add(setting_row("Diameter", None, self.diameter_step))
+        size.add(setting_row("Tile size", None, self.tile_step))
+        size.add(setting_row("Tile rows", "Worked out from the two above. The tile rows step starts here.",
+                             self.rows_hint))
+        turn = SettingsGroup("Rotation", "If a motor turns the ball. Noted down for later features; it changes "
+                                        "nothing in the show yet.")
+        turn.add(setting_row("Direction", "As seen facing the ball.", self.rotation_seg))
+        turn.add(setting_row("Speed", None, self.speed_hint, self.speed_step))
+        return vbox(18, intro, size, turn, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
+
+    def _rotation_key(self) -> str:
+        r = self.ball_rotation_rpm
+        return "still" if not r else ("right" if r > 0 else "left")
+
+    def _ball_text(self) -> str:
+        """The step's whole result in one line, for the confirmation page."""
+        r = self.ball_rotation_rpm
+        turning = "not turning" if not r else f"{abs(r):.1f} rpm {'right' if r > 0 else 'left'}"
+        return f"{self.ball_diameter:.0f} cm \u00b7 {self.ball_tile:.0f} mm tiles \u00b7 {turning}"
 
     def _build_axis_page(self) -> Gtk.Widget:
         self.axis_diagram = BallDiagram()
@@ -360,16 +408,9 @@ class CalibrationWindow(Adw.Window):
     def _build_rows_page(self) -> Gtk.Widget:
         self.rows_diagram = BallDiagram()
         self.read_rows = label("", "secondary")
+        self.rows_from_ball = label("", "secondary")  # what step 1's measurements make the starting pitch
         left = vbox(12, self.rows_diagram, hbox(8, label("Result", hexpand=True), self.read_rows),
                     label("Read only. Calculated from offset and pitch.", "hint", wrap=True), width_request=270)
-        b = self.main.store.load().ball
-        self.ball_saved = bool(b.diameter_cm and b.tile_mm)
-        self.ball_diameter, self.ball_tile = b.diameter_cm or 30.0, b.tile_mm or 10.0
-        self._ball_initial = (self.ball_diameter, self.ball_tile)
-        self.diameter_step = Stepper(self.ball_diameter, 5, 200, 1, lambda v: f"<b>{v:.0f}</b> cm",
-                                     lambda v: self._ball_changed(diameter=v), width=140)
-        self.tile_step = Stepper(self.ball_tile, 2, 50, 1, lambda v: f"<b>{v:.0f}</b> mm",
-                                 lambda v: self._ball_changed(tile=v), width=140)
 
         def nudge(name: str, sub: str, neg: tuple[str, str, Any], pos: tuple[str, str, Any]) -> Gtk.Widget:
             row = hbox(6, vbox(2, label(name), label(sub, "hint")), Gtk.Box(hexpand=True))
@@ -388,35 +429,55 @@ class CalibrationWindow(Adw.Window):
             nudge("Pitch", "narrower / wider", ("←", "go-previous-symbolic", ("pitch", -1)), ("→", "go-next-symbolic", ("pitch", +1))),
             hbox(12, label("Step", hexpand=True), self.rows_step),
             vbox(6, vbox(0, label("Pattern"), label("shown on the ball", "hint")), self.pattern_seg),
-            vbox(6, vbox(0, label("Start from the ball's size"),
-                         label("Sets the pitch to begin nudging from", "hint", wrap=True)),
-                 hbox(12, label("Diameter", hexpand=True), self.diameter_step),
-                 hbox(12, label("Tile size", hexpand=True), self.tile_step)),
+            vbox(4, vbox(0, label("Starting pitch"), label("From the ball's size, set on step 1", "hint", wrap=True)),
+                 self.rows_from_ball),
             hexpand=True,
         )
         return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
 
-    def _ball_changed(self, diameter: float | None = None, tile: float | None = None) -> None:
+    def _ball_changed(self, diameter: float | None = None, tile: float | None = None, rpm: float | None = None,
+                      direction: str | None = None) -> None:
         """The ball's measurements only seed the pitch; the zebra then decides it. Without a seed within
         about 20 % the zebra is ambiguous, because lighting every second row looks just as crisp."""
         if getattr(self, "_syncing", False):
             return
-        self.ball_diameter = diameter if diameter is not None else self.ball_diameter
-        self.ball_tile = tile if tile is not None else self.ball_tile
-        self.ball_saved = True
-        if self.rows:
-            self.rows.set_pitch(cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)))
-            self.rows_cleared = False
-            self._send_preview()
+        if rpm is not None or direction is not None:
+            sign = {"still": 0.0, "right": 1.0, "left": -1.0}[direction or self._rotation_key()]
+            self.ball_rotation_rpm = sign * (self.speed_step.value if rpm is None else rpm)
+        if diameter is not None or tile is not None:
+            self.ball_diameter = self.ball_diameter if diameter is None else diameter
+            self.ball_tile = self.ball_tile if tile is None else tile
+            self.ball_saved = True
+            if self.rows:  # the rows step was already visited: re-seed it from the new measurements
+                self.rows.set_pitch(cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)))
+                self.rows_cleared = False
+                self._send_preview()
         self._update()
+
+    def _seeded_pitch(self) -> float:
+        return cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile))
+
+    @property
+    def ball_measured(self) -> bool:
+        """The ball was measured on step 1 this time round, so the pitch it seeds is a real value."""
+        return (self.ball_diameter, self.ball_tile) != self._ball_initial[:2]
+
+    @property
+    def rows_will_save(self) -> bool:
+        """Whether finish() will write a row grid, and so whether scenes will snap to rows.
+
+        An untouched default pitch is not saved, because that alone would switch snapping on. One the ball's own
+        measurements seeded is worth keeping even if the zebra was only looked at."""
+        return bool(self.rows and not self.rows_cleared and (self.rows.dirty or self.ball_measured))
 
     def _build_done_page(self) -> Gtk.Widget:
         self.done_diagram = BallDiagram()
         left = vbox(12, self.done_diagram, label("The projector shows the same globe on the ball.", "hint", wrap=True),
                     width_request=270)
-        self.done_silhouette, self.done_axis, self.done_rows = (label("", "secondary") for _ in range(3))
+        self.done_ball, self.done_silhouette, self.done_axis, self.done_rows = (label("", "secondary") for _ in range(4))
         summary = vbox(4)
-        for name, w in (("Silhouette", self.done_silhouette), ("Ball axis", self.done_axis), ("Tile rows", self.done_rows)):
+        for name, w in (("Ball", self.done_ball), ("Silhouette", self.done_silhouette), ("Ball axis", self.done_axis),
+                        ("Tile rows", self.done_rows)):
             summary.append(hbox(8, label(name, hexpand=True), w))
         note = hbox(12, icon("dialog-information-symbolic", 18), label(
             "Finish writes these values to the configuration and reloads the show. Cancel leaves the saved "
@@ -427,7 +488,7 @@ class CalibrationWindow(Adw.Window):
 
     def _spin_tick(self) -> bool:
         """Turn the globe on both the confirmation page and the projector while step 4 is showing."""
-        if self._closing or self.step_no != 4:
+        if self._closing or self.step_no != STEP_DONE:
             self._spin_timer = 0
             return False
         self.done_diagram.spin = (self.done_diagram.spin + SPIN_DPS * SPIN_TICK_MS / 1000) % 360
@@ -444,7 +505,8 @@ class CalibrationWindow(Adw.Window):
         if mods & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
             return False
         name = Gdk.keyval_name(keyval) or ""
-        mapper = {1: key_to_action, 2: axis_key_to_action, 3: rows_key_to_action, 4: done_key_to_action}[self.step_no]
+        mapper = {STEP_BALL: ball_key_to_action, STEP_SILHOUETTE: key_to_action, STEP_AXIS: axis_key_to_action,
+                  STEP_ROWS: rows_key_to_action, STEP_DONE: done_key_to_action}[self.step_no]
         hit = mapper(name)
         if hit is None:
             return False
@@ -457,11 +519,11 @@ class CalibrationWindow(Adw.Window):
             self._go(self.step_no + 1)
         elif action == "back":
             self._go(self.step_no - 1) if self.step_no > 1 else None
-        elif self.step_no == 1:
+        elif self.step_no == STEP_SILHOUETTE:
             self._act(action, arg)
-        elif self.step_no == 2:
+        elif self.step_no == STEP_AXIS:
             self._axis_act(action, arg)
-        else:
+        elif self.step_no == STEP_ROWS:
             self._rows_act(action, arg)
         return True
 
@@ -491,23 +553,24 @@ class CalibrationWindow(Adw.Window):
         if not self.session:
             return
         payload = self.session.preview()
-        if self.step_no == 2 and self.axis:
+        if self.step_no == STEP_AXIS and self.axis:
             cal = self.axis.calibration()
             payload.update(roll_deg=cal.roll_deg, tilt_deg=cal.tilt_deg, lines=False, grid=True, blink=False,
                            crosshair=list(self.axis.crosshair_norm()))
-        elif self.step_no == 3 and self.rows:
+        elif self.step_no == STEP_ROWS and self.rows:
             payload.update(lines=False, grid=False, blink=False, rows=self.rows.preview())
-        elif self.step_no == 4:
+        elif self.step_no == STEP_DONE:
             payload.update(lines=False, grid=True, blink=False, spin=True)
         self.main.send("calibration.preview", **payload)
 
     # --- steps 2 and 3 -------------------------------------------------------------------
 
     INSTRUCTIONS = {
-        1: "Move each line until it just touches the edge of the ball.",
-        2: "Move the crosshair onto the hanger eyelet at the top of the ball.",
-        3: "Nudge the rows until the projected stripes line up with the mirror tiles.",
-        4: "A turning globe is projected onto the ball. Check that it hugs the edges, then finish.",
+        STEP_BALL: "Tell us about the ball. Rough values are enough.",
+        STEP_SILHOUETTE: "Move each line until it just touches the edge of the ball.",
+        STEP_AXIS: "Move the crosshair onto the hanger eyelet at the top of the ball.",
+        STEP_ROWS: "Nudge the rows until the projected stripes line up with the mirror tiles.",
+        STEP_DONE: "A turning globe is projected onto the ball. Check that it hugs the edges, then finish.",
     }
 
     def _go(self, step: int) -> None:
@@ -515,15 +578,15 @@ class CalibrationWindow(Adw.Window):
         s = self.session
         if s is None or step == self.step_no:
             return
-        if self.step_no == 2 and self.axis:
+        if self.step_no == STEP_AXIS and self.axis:
             s.cal = self.axis.calibration()
-        if step == 2:  # rebuilt on every entry: the lines may have changed since the last visit
+        if step == STEP_AXIS:  # rebuilt on every entry: the lines may have changed since the last visit
             self.axis = AxisSession(s.cal, s.width, s.height, step=s.step)
             self.axis_step.select(s.step)
             self.above_seg.select("above" if self.axis.above else "below")
-        if step == 3 and self.rows is None:
+        if step == STEP_ROWS and self.rows is None:
             self.rows = RowsSession(*self._initial_rows())
-        if step == 4 and not self._spin_timer:
+        if step == STEP_DONE and not self._spin_timer:
             self._spin_timer = GLib.timeout_add(SPIN_TICK_MS, self._spin_tick)
         self.step_no = step
         self.pages.set_visible_child_name(str(step))
@@ -536,8 +599,8 @@ class CalibrationWindow(Adw.Window):
         b = self.main.store.load().ball
         if b.row_pitch_deg:
             return b.row_pitch_deg, b.row_offset_deg
-        if self.ball_saved:  # never calibrated, but the ball's measurements are on file
-            return cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)), 0.0
+        if self.ball_saved:  # never calibrated, but the ball has been measured (on file, or on step 1)
+            return self._seeded_pitch(), 0.0
         return DEFAULT_PITCH, 0.0
 
     def _axis_act(self, action: str, arg: Any) -> None:
@@ -631,7 +694,7 @@ class CalibrationWindow(Adw.Window):
             banners.append(("Starting the renderer. The lines appear on the projector in a moment.", True))
         elif st and st.get("window") and not st["window"]["fullscreen"]:
             banners.append(("The output window is not fullscreen yet. Move it to the projector and press F11.", False))
-        if s and self.step_no == 1 and s.aspect_warning:
+        if s and self.step_no == STEP_SILHOUETTE and s.aspect_warning:
             banners.append((s.aspect_message(), False))
         key = tuple(banners)
         if key != getattr(self, "_banner_key", None):
@@ -644,9 +707,10 @@ class CalibrationWindow(Adw.Window):
         for i, pill in enumerate(self.step_pills, start=1):
             set_classes(pill.get_first_child(), {"current": i == self.step_no})
         active = s is not None and self.main.connected
-        for w in (self.finish_btn, self.next1_btn, self.next_btn, self.next3_btn, *self.reset_btns.values(),
-                  self.blink_btn, self.grid_btn, self.step_seg):
+        for w in (self.finish_btn, *self.next_btns.values(), self.blink_btn, self.grid_btn, self.step_seg,
+                  *(b for step, b in self.reset_btns.items() if step != STEP_BALL)):
             w.set_sensitive(active)
+        self._update_ball()
         dark = Adw.StyleManager.get_default().get_dark()
         self.diagram.dark = self.axis_diagram.dark = self.rows_diagram.dark = self.done_diagram.dark = dark
         if s is None:
@@ -681,29 +745,44 @@ class CalibrationWindow(Adw.Window):
             self.axis_diagram.queue_draw()
         if self.rows:
             self.read_rows.set_text(self.rows.text())
+            self.rows_from_ball.set_text(f"{self.ball_diameter:.0f} cm · {self.ball_tile:.0f} mm → {self._seeded_pitch():.1f}°")
             self.rows_diagram.roll, self.rows_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.rows_diagram.rows = (self.rows.pitch, self.rows.offset, self.rows.mode)
             self.rows_diagram.queue_draw()
-        if self.step_no == 4:
+        if self.step_no == STEP_DONE:
+            self.done_ball.set_text(self._ball_text())
             self.done_silhouette.set_text(f"{fmt_px(sw)} × {fmt_px(sh)} px at {fmt_px(cx)}, {fmt_px(cy)}")
             self.done_axis.set_text(" · ".join(self.axis.texts()) if self.axis and self.axis.dirty else "Not set")
-            self.done_rows.set_text("Not set" if self.rows_cleared or not (self.rows and self.rows.dirty) else self.rows.text())
+            self.done_rows.set_text(self.rows.text() if self.rows_will_save else "Not set")
             self.done_diagram.roll, self.done_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.done_diagram.queue_draw()
 
+    def _update_ball(self) -> None:
+        """Step 1 describes the hardware, so it reads the same with or without a renderer."""
+        rows = cm.rows_from_tile(self.ball_diameter, self.ball_tile)
+        self.rows_hint.set_text(f"≈ {rows:.0f} rows · {self._seeded_pitch():.1f}° each")
+        turning = self.ball_rotation_rpm != 0
+        self.rotation_seg.select(self._rotation_key())
+        self.speed_step.set_sensitive(turning)
+        self.speed_hint.set_text(f"≈ {60 / self.speed_step.value:.0f} s per turn" if turning else "")
+
     RESET_BODY = {
-        1: "The lines go back to a centred, round ball at 70 % of the screen height.",
-        2: "The ball's axis goes back to upright, with the projector level with the equator.",
-        3: f"The row grid goes back to {DEFAULT_PITCH:g}° per row, and scenes stop snapping to rows.",
+        STEP_BALL: f"The ball goes back to {DEFAULT_DIAMETER_CM:g} cm with {DEFAULT_TILE_MM:g} mm tiles, and to "
+                   "not turning.",
+        STEP_SILHOUETTE: "The lines go back to a centred, round ball at 70 % of the screen height.",
+        STEP_AXIS: "The ball's axis goes back to upright, with the projector level with the equator.",
+        STEP_ROWS: f"The row grid goes back to {DEFAULT_PITCH:g}° per row, and scenes stop snapping to rows.",
     }
 
     def _step_dirty(self, step: int) -> bool:
-        return bool({1: self.session and self.session.dirty, 2: self.axis and self.axis.dirty,
-                     3: self.rows and self.rows.dirty}.get(step))
+        ball = (self.ball_diameter, self.ball_tile, self.ball_rotation_rpm) != self._ball_initial
+        return bool({STEP_BALL: ball, STEP_SILHOUETTE: self.session and self.session.dirty,
+                     STEP_AXIS: self.axis and self.axis.dirty,
+                     STEP_ROWS: self.rows and self.rows.dirty}.get(step))
 
     def _on_reset(self, step: int) -> None:
         """Each page resets only what it sets. Asked for only when there is something to lose."""
-        if not self.session:
+        if not self.session and step != STEP_BALL:
             return
         if not self._step_dirty(step):
             self._do_reset(step)
@@ -716,12 +795,29 @@ class CalibrationWindow(Adw.Window):
         dlg.present(self)
 
     def _do_reset(self, step: int) -> None:
+        if step == STEP_BALL:  # the only page that does not need a session: it describes the hardware
+            self.ball_diameter, self.ball_tile = DEFAULT_DIAMETER_CM, DEFAULT_TILE_MM
+            self.ball_rotation_rpm = 0.0
+            self._syncing = True
+            try:
+                self.diameter_step.set_value(self.ball_diameter)
+                self.tile_step.set_value(self.ball_tile)
+                self.speed_step.set_value(DEFAULT_RPM)
+                self.rotation_seg.select("still")
+            finally:
+                self._syncing = False
+            self.ball_saved = False  # as if never measured: the rows step falls back to its own default
+            if self.rows:
+                self.rows.set_pitch(DEFAULT_PITCH)
+            self._send_preview()
+            self._update()
+            return
         s = self.session
         if s is None:
             return
-        if step == 1:
+        if step == STEP_SILHOUETTE:
             s.reset(self._default_calibration())
-        elif step == 2:
+        elif step == STEP_AXIS:
             s.cal = replace(s.cal, roll_deg=0.0, tilt_deg=0.0)
             self.axis = AxisSession(s.cal, s.width, s.height, step=s.step)
             self.above_seg.select("above")
@@ -736,7 +832,7 @@ class CalibrationWindow(Adw.Window):
     def finish(self) -> None:
         if not self.session or not self.main.connected:
             return
-        if self.step_no == 2 and self.axis:  # finishing straight from the axis step keeps the crosshair's angles
+        if self.step_no == STEP_AXIS and self.axis:  # finishing straight from the axis step keeps the crosshair's angles
             self.session.cal = self.axis.calibration()
         c = self.session.cal
         if not c.is_valid():
@@ -746,11 +842,12 @@ class CalibrationWindow(Adw.Window):
         data["calibrated_at"] = datetime.now().isoformat(timespec="minutes")
         updates: dict[str, Any] = {"calibration": data}
         ball: dict[str, Any] = {}
-        if (self.ball_diameter, self.ball_tile) != self._ball_initial:  # remembered for the next calibration
-            ball.update(diameter_cm=self.ball_diameter, tile_mm=self.ball_tile)
-        if self.rows_cleared:  # step 3 was reset: snapping goes off again
+        if (self.ball_diameter, self.ball_tile, self.ball_rotation_rpm) != self._ball_initial:  # for the next time
+            ball.update(diameter_cm=self.ball_diameter, tile_mm=self.ball_tile,
+                        rotation_rpm=round(self.ball_rotation_rpm, 3))
+        if self.rows_cleared:  # the rows step was reset: snapping goes off again
             ball.update(row_pitch_deg=None, row_offset_deg=0.0)
-        elif self.rows and self.rows.dirty:  # untouched rows are not saved: a default pitch would switch snapping on
+        elif self.rows_will_save:
             ball.update(row_pitch_deg=round(self.rows.pitch, 4), row_offset_deg=round(self.rows.offset, 4))
         if ball:
             updates["ball"] = ball

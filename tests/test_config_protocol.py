@@ -47,6 +47,16 @@ bindings:
     assert c.bindings.keys["1"] == "bars-to-poles"
 
 
+def test_the_balls_rotation_is_a_signed_rate(tmp_path):
+    p = tmp_path / "c.yaml"
+    assert load_config(p).ball.rotation_rpm == 0.0  # nothing on file: the ball is assumed to stand still
+    p.write_text("ball: {diameter_cm: 50, rotation_rpm: -1.5}\n")  # minus: it turns left, facing the ball
+    b = load_config(p).ball
+    assert (b.diameter_cm, b.rotation_rpm) == (50, -1.5) and b.row_pitch_deg is None
+    update_config(p, {"ball": {"rotation_rpm": 2.0}})
+    assert load_config(p).ball.rotation_rpm == 2.0
+
+
 @pytest.mark.parametrize("text,needle", [
     ("clock: {bpm: 5}\n", "clock.bpm"),
     ("clok: {}\n", "clok: unknown key"),

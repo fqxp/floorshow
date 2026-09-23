@@ -784,7 +784,7 @@ def test_tapped_tempo_is_saved_once_tapping_stops(cfgwin):
     assert load_config(tmp / "config.yaml").clock.bpm == 84.1
 
 
-# --- calibration steps 2 (ball axis) and 3 (tile rows) -------------------------------------------
+# --- calibration steps 1 (ball), 3 (ball axis) and 4 (tile rows) -------------------------------------------
 
 
 def last_preview(fake):
@@ -795,9 +795,9 @@ def test_axis_step_drives_the_renderer_overlay_and_saves_roll_and_tilt(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(2)
+    cal._go(3)
     p = last_preview(fake)
-    assert cal.step_no == 2 and cal.pages.get_visible_child_name() == "2"
+    assert cal.step_no == 3 and cal.pages.get_visible_child_name() == "3"
     assert p["lines"] is False and p["grid"] is True and p.get("rows") is None and len(p["crosshair"]) == 2
     assert cal.instruction.get_text().startswith("Move the crosshair onto the hanger eyelet")
     assert cal.read_tilt.get_text().startswith("0°") and "upright" in cal.read_roll.get_text()
@@ -819,17 +819,17 @@ def test_axis_numeric_fallback_and_reset(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(2)
+    cal._go(3)
     cal.height_step.set_value(35, notify=True)
     cal.distance_step.set_value(2.4, notify=True)
     assert last_preview(fake)["tilt_deg"] == pytest.approx(8.3, abs=0.05)
-    cal._go(3)  # Next applies the angles
+    cal._go(4)  # Next applies the angles
     assert cal.session.cal.tilt_deg == pytest.approx(8.3, abs=0.05)
-    cal._go(2)
-    cal._do_reset(2)  # the page's own Reset to defaults: upright again
+    cal._go(3)
+    cal._do_reset(3)  # the page's own Reset to defaults: upright again
     assert last_preview(fake)["tilt_deg"] == 0.0 and cal.above_seg.selected() == "above"
     assert not cal.axis.dirty and cal.height_step.value == 0
-    cal._go(3)
+    cal._go(4)
     assert cal.session.cal.tilt_deg == 0.0
 
 
@@ -837,7 +837,7 @@ def test_rows_step_previews_stripes_and_saves_only_what_was_changed(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
+    cal._go(4)
     p = last_preview(fake)
     assert p["lines"] is False and p["rows"] == {"mode": "zebra", "pitch_deg": 4.0, "offset_deg": 0.0} and p.get("crosshair") is None
     assert cal.read_rows.get_text() == "rows ≈ 45.0 · tile 4.0°"
@@ -849,7 +849,7 @@ def test_rows_step_nudges_and_persists(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
+    cal._go(4)
     cal._rows_act("step", "coarse")
     cal._rows_act("offset", +1)
     cal._rows_act("pitch", +1)
@@ -867,21 +867,21 @@ def test_rows_start_from_the_configured_ball_size_and_back_navigation(cfgwin):
     (tmp / "config.yaml").write_text("ball: {diameter_cm: 30, tile_mm: 10}\n")
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
+    cal._go(4)
     assert cal.read_rows.get_text() == "rows ≈ 47.1 · tile 3.8°"  # from the ball's size, as the design's example
+    cal._go(3)
+    assert cal.step_no == 3 and last_preview(fake)["crosshair"] is not None
     cal._go(2)
-    assert cal.step_no == 2 and last_preview(fake)["crosshair"] is not None
-    cal._go(1)
     p = last_preview(fake)
     assert p.get("lines", True) is True and p.get("crosshair") is None and p.get("rows") is None
-    assert cal.footers.get_visible_child_name() == "1"
+    assert cal.footers.get_visible_child_name() == "2"
 
 
 def test_the_balls_size_seeds_the_pitch_and_is_remembered(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
+    cal._go(4)
     assert cal.diameter_step.value == 30 and cal.tile_step.value == 10  # placeholders until they are typed
     assert cal.rows.pitch == 4.0  # nothing on file: the default pitch, not one derived from the placeholders
     cal.diameter_step.set_value(50, notify=True)
@@ -889,15 +889,77 @@ def test_the_balls_size_seeds_the_pitch_and_is_remembered(cfgwin):
     assert last_preview(fake)["rows"]["pitch_deg"] == pytest.approx(cal.rows.pitch)
     cal.tile_step.set_value(20, notify=True)
     assert cal.rows.pitch == pytest.approx(2 * 180 / (3.14159265 * 500 / 20), rel=0.01)  # twice the tile, twice the pitch
-    cal._go(4)
+    cal._go(5)
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
     assert (b.diameter_cm, b.tile_mm) == (50, 20) and b.row_pitch_deg == pytest.approx(cal.rows.pitch, abs=1e-3)
     # and a second calibration starts from what was measured
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
+    cal._go(4)
     assert cal.diameter_step.value == 50 and cal.tile_step.value == 20
+
+
+def test_the_ball_step_holds_the_hardware_and_seeds_the_rows(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal.step_no == 1 and (cal.diameter_step.value, cal.tile_step.value) == (30, 10)
+    assert cal.rows_hint.get_text() == "≈ 47 rows · 3.8° each"  # what the placeholders imply
+    assert last_preview(fake).get("lines", True) is True  # the silhouette lines, as on step 2
+    cal.diameter_step.set_value(50, notify=True)
+    cal.tile_step.set_value(20, notify=True)
+    assert cal.rows_hint.get_text() == "≈ 39 rows · 4.6° each"
+    cal._go(4)  # the rows step starts from the measurements, without them being typed there
+    assert cal.rows.pitch == pytest.approx(cal._seeded_pitch(), abs=1e-6)
+    cal._go(5)
+    assert cal.done_ball.get_text() == "50 cm · 20 mm tiles · not turning"
+    assert cal.done_rows.get_text().startswith("rows")  # measured, so the seeded grid is kept
+    cal.finish()
+    b = load_config(tmp / "config.yaml").ball
+    assert (b.diameter_cm, b.tile_mm, b.rotation_rpm) == (50, 20, 0.0)
+    assert b.row_pitch_deg == pytest.approx(cal._seeded_pitch(), abs=1e-3)
+
+
+def test_the_ball_step_records_the_rotation_direction_and_speed(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal.rotation_seg.selected() == "still"
+    assert not cal.speed_step.get_sensitive() and cal.speed_hint.get_text() == ""
+    cal._ball_changed(direction="left")
+    assert cal.speed_step.get_sensitive() and cal.speed_hint.get_text() == "≈ 40 s per turn"
+    cal.speed_step.set_value(3.0, notify=True)
+    assert cal.ball_rotation_rpm == -3.0 and cal.speed_hint.get_text() == "≈ 20 s per turn"
+    cal._go(5)
+    assert cal.done_ball.get_text() == "30 cm · 10 mm tiles · 3.0 rpm left"
+    cal.finish()
+    assert load_config(tmp / "config.yaml").ball.rotation_rpm == -3.0
+    # and the next calibration starts from it, direction and all
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal.rotation_seg.selected() == "left" and cal.speed_step.value == 3.0
+    cal._ball_changed(direction="right")
+    cal.finish()
+    assert load_config(tmp / "config.yaml").ball.rotation_rpm == 3.0
+
+
+def test_resetting_the_ball_step_puts_the_placeholders_back(cfgwin):
+    w, fake, tmp = cfgwin
+    (tmp / "config.yaml").write_text("ball: {diameter_cm: 50, tile_mm: 20, rotation_rpm: -1.5}\n")
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal._step_dirty(1) is False  # straight from the file, nothing changed yet
+    cal.speed_step.set_value(2.0, notify=True)
+    assert cal._step_dirty(1) is True
+    cal._do_reset(1)
+    assert (cal.ball_diameter, cal.ball_tile, cal.ball_rotation_rpm) == (30.0, 10.0, 0.0)
+    assert cal.rotation_seg.selected() == "still" and cal.diameter_step.value == 30
+    cal._go(5)
+    assert cal.done_ball.get_text() == "30 cm · 10 mm tiles · not turning"
+    cal.finish()
+    b = load_config(tmp / "config.yaml").ball
+    assert (b.diameter_cm, b.tile_mm, b.rotation_rpm) == (30.0, 10.0, 0.0)
 
 
 def test_every_step_leads_to_the_confirmation_screen(cfgwin):
@@ -906,8 +968,8 @@ def test_every_step_leads_to_the_confirmation_screen(cfgwin):
 
     w.open_calibration()
     cal = w.calibration_window
-    assert key_to_action("Return") == ("next", None)  # step 1 no longer finishes early
-    for step in (2, 3, 4):
+    assert key_to_action("Return") == ("next", None)  # the silhouette no longer finishes early
+    for step in (2, 3, 4, 5):
         cal._on_key(None, Gdk.KEY_Return, 0, Gdk.ModifierType(0))
         assert cal.step_no == step and cal.footers.get_visible_child_name() == str(step)
     assert rows_key_to_action("Return") == ("next", None) and done_key_to_action("Return") == ("finish", None)
@@ -926,15 +988,15 @@ def test_every_editing_page_has_a_reset_and_none_has_a_skip(cfgwin):
     w, fake, tmp = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    for step in (1, 2, 3, 4):
+    for step in (1, 2, 3, 4, 5):
         if step != 1:
             cal._go(step)
         labels = texts(cal.footers.get_child_by_name(str(step)))
         assert "Skip" not in labels
-        assert ("Reset to defaults" in labels) is (step in (1, 2, 3))
-    cal._go(1)
+        assert ("Reset to defaults" in labels) is (step in (1, 2, 3, 4))
+    cal._go(2)
     cal._act("line", ("top", +1))
-    cal._do_reset(1)
+    cal._do_reset(2)
     assert not cal.session.dirty and cal.read_size.get_text() == "756 × 756 px"
 
 
@@ -943,18 +1005,18 @@ def test_resetting_the_rows_step_switches_snapping_off_again(cfgwin):
     (tmp / "config.yaml").write_text("ball: {row_pitch_deg: 3.8, row_offset_deg: 1.0}\n")
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
-    cal._rows_act("offset", +1)
     cal._go(4)
+    cal._rows_act("offset", +1)
+    cal._go(5)
     assert cal.done_rows.get_text().startswith("rows")
     cal.finish()
     assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(1.2)
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(3)
-    cal._do_reset(3)
-    assert cal.rows_cleared and cal.rows.pitch == 4.0 and cal.rows.offset == 0.0
     cal._go(4)
+    cal._do_reset(4)
+    assert cal.rows_cleared and cal.rows.pitch == 4.0 and cal.rows.offset == 0.0
+    cal._go(5)
     assert cal.done_rows.get_text() == "Not set"
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
@@ -967,10 +1029,10 @@ def test_step_keys_reach_the_right_handlers(cfgwin):
 
     w.open_calibration()
     cal = w.calibration_window
-    cal._go(2)
+    cal._go(3)
     cal._axis_act(*axis_key_to_action("Down"))
     assert cal.axis.py < 1.0
-    cal._go(3)
+    cal._go(4)
     before = cal.rows.offset
     cal._rows_act(*rows_key_to_action("Up"))
     assert cal.rows.offset == pytest.approx(before + 0.2)
@@ -982,7 +1044,7 @@ def test_calibration_window_fits_the_designed_720_pixel_width_on_every_step(cfgw
     w, fake, _ = cfgwin
     w.open_calibration()
     cal = w.calibration_window
-    for step in (1, 2, 3):
+    for step in (1, 2, 3, 4):
         cal._go(step)
         page = cal.pages.get_child_by_name(str(step)).measure(Gtk.Orientation.HORIZONTAL, -1)[0]
         footer = cal.footers.get_child_by_name(str(step)).measure(Gtk.Orientation.HORIZONTAL, -1)[0]
@@ -1013,7 +1075,7 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         cal = win.calibration_window
         wait(lambda: rig.core.state(time.monotonic())["calibrating"], "calibrating")
         # step 2: the renderer draws the crosshair and the tilted grid, not the four lines
-        cal._go(2)
+        cal._go(3)
         cal._axis_act("step", "coarse")
         for _ in range(8):
             cal._axis_act("cross", (0, 1))
@@ -1024,7 +1086,7 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         assert f.overlay.lines is None and f.overlay.grid and f.overlay.crosshair == pytest.approx(cal.axis.crosshair_norm())
         assert f.cal.tilt_deg == pytest.approx(cal.axis.calibration().tilt_deg) and f.cal.tilt_deg > 5
         # step 3: the renderer draws the row stripes for the pitch and offset chosen here
-        cal._go(3)
+        cal._go(4)
         cal._rows_act("pitch", +1)
         wait(lambda: rig.core._cal_preview and (rig.core._cal_preview.get("rows") or {}).get("pitch_deg") == pytest.approx(4.02),
              "the row pitch reached the renderer")

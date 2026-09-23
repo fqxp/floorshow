@@ -127,6 +127,8 @@ def on_activate(app):
     win.open_calibration()
     cal = win.calibration_window
     pump(300)
+    shot(cal, "cal0_ball")
+    cal._go(2)
     shot(cal, "cal1_default")
     cal.session.apply("line", ("left", -1)); cal.session.step = "coarse"
     for _ in range(3):
@@ -138,14 +140,14 @@ def on_activate(app):
     cal._update()
     shot(cal, "cal1_warning")
     cal.session.reset(cal._default_calibration())
-    cal._go(2)
+    cal._go(3)
     cal._axis_act("step", "coarse")
     for _ in range(6):
         cal._axis_act("cross", (0, 1))
     for _ in range(2):
         cal._axis_act("cross", (-1, 0))
     shot(cal, "cal2_axis")
-    cal._go(3)
+    cal._go(4)
     cal._rows_act("step", "coarse")
     cal._rows_act("offset", +1)
     shot(cal, "cal3_rows")

@@ -4,9 +4,10 @@
 > projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
 > The controller's main window, its scenes and preferences dialogs and calibration are built; the motor is not.
 > Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
-> wizard: the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the tile rows
-> (pitch and offset, checked with a zebra of stripes, starting from the ball's diameter and tile size) and a
-> confirmation step that projects a turning globe.
+> wizard: the ball itself (diameter, tile size and whether a motor turns it, all rough — they only seed the
+> steps that follow), the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the
+> tile rows (pitch and offset, checked with a zebra of stripes) and a confirmation step that projects a
+> turning globe.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
 **Writing scenes:** [docs/scenes-tutorial.md](docs/scenes-tutorial.md) is a worked introduction,

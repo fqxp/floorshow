@@ -17,6 +17,14 @@ LINE_KEYS: dict[str, tuple[Side, int]] = {
 ARROWS = {"Left": (-1, 0), "Right": (+1, 0), "Up": (0, -1), "Down": (0, +1)}
 DEFAULT_SIZE = (1920, 1080)  # until the renderer reports its window size
 
+# The wizard's pages, in order. Named, because every step-dependent branch would otherwise be a bare number.
+STEP_BALL, STEP_SILHOUETTE, STEP_AXIS, STEP_ROWS, STEP_DONE = 1, 2, 3, 4, 5
+
+
+def ball_key_to_action(name: str) -> tuple[str, Any] | None:
+    """Step 1 has nothing to nudge, so the arrow keys are left to move the focus as usual."""
+    return {"Escape": ("cancel", None), "Return": ("next", None), "KP_Enter": ("next", None)}.get(name)
+
 
 def key_to_action(name: str) -> tuple[str, Any] | None:
     """GDK key name -> (action, argument), following the design's shortcut sheet."""
