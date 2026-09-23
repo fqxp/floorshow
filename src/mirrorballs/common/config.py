@@ -115,6 +115,12 @@ class Bindings(_Base):
     keys: dict[str, str] = {}  # controller-side keyboard: key -> scene id or action
 
 
+class TrailConfig(_Base):
+    # Turning light on and off on a mirror ball is a big movement; letting what disappears fade out
+    # over a fraction of a second makes it read as smooth without softening the hit on the beat.
+    seconds: float = Field(0.0, ge=0, le=3)  # 0 = off
+
+
 class UiConfig(_Base):
     beat_indicator: bool = True  # the beat tile and bar pips in the controller
 
@@ -127,6 +133,7 @@ class Config(_Base):
     director: DirectorConfig = DirectorConfig()
     midi: MidiConfig = MidiConfig()
     bindings: Bindings = Bindings()
+    trail: TrailConfig = TrailConfig()
     safety: dict | None = None  # the flash limiter was removed; old files that still have this section keep loading
     ui: UiConfig = UiConfig()
 

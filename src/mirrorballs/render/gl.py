@@ -1,8 +1,12 @@
-"""moderngl pipeline: scene pass(es) into offscreen targets, then a composite pass to the screen.
+"""moderngl pipeline: scene pass(es) into offscreen targets, then two full-screen passes out.
 
 Pass 1 (``scene.frag``) evaluates every shape per pixel on the GPU, using the calibrated
-silhouette ellipse to find the ball direction under each pixel. Pass 2 (``composite.frag``)
-does the transition between two scene targets, master brightness, and the calibration overlay.
+silhouette ellipse to find the ball direction under each pixel. Pass 2 (``blend.frag``) puts the
+two scene targets through the transition and keeps the trail: it reads what it wrote last frame,
+dimmed. Pass 3 (``composite.frag``) applies master brightness and draws the calibration overlay.
+
+The split matters: master brightness and the overlay come *after* the trail, so a blackout is
+instant rather than fading out through the trail, and calibration lines never smear.
 Python only uploads a few hundred floats per frame.
 """
 
@@ -83,9 +87,11 @@ class GlPipeline:
         self.ctx = ctx
         vert = (SHADERS / "quad.vert").read_text()
         self.scene_prog = ctx.program(vertex_shader=vert, fragment_shader=_source("scene.frag"))
+        self.blend_prog = ctx.program(vertex_shader=vert, fragment_shader=_source("blend.frag"))
         self.comp_prog = ctx.program(vertex_shader=vert, fragment_shader=_source("composite.frag"))
         quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes())
         self.scene_vao = ctx.vertex_array(self.scene_prog, [(quad, "2f", "in_position")])
+        self.blend_vao = ctx.vertex_array(self.blend_prog, [(quad, "2f", "in_position")])
         self.comp_vao = ctx.vertex_array(self.comp_prog, [(quad, "2f", "in_position")])
 
         self.ubo = ctx.buffer(reserve=MAX_SHAPES * FLOATS_PER_SHAPE * 4)
@@ -96,22 +102,29 @@ class GlPipeline:
         self._tex_cache: dict[tuple, moderngl.TextureArray] = {}
         self.size = (0, 0)
         self.targets: list[tuple[moderngl.Texture, moderngl.Framebuffer]] = []
+        # Trail history, ping-ponged: blend.frag reads one and writes the other. Half floats, because
+        # repeatedly multiplying an 8-bit value by the decay rounds back to itself at low brightness
+        # and leaves a ghost burnt in that never reaches black.
+        self.history: list[tuple[moderngl.Texture, moderngl.Framebuffer]] = []
+        self._hist = 0
 
     # --- resources -----------------------------------------------------------------------
 
     def set_size(self, width: int, height: int) -> None:
         if (width, height) == self.size or width <= 0 or height <= 0:
             return
-        for tex, fbo in self.targets:
+        for tex, fbo in (*self.targets, *self.history):
             fbo.release()
             tex.release()
-        self.targets = []
-        for _ in range(2):
-            tex = self.ctx.texture((width, height), 4)
-            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            tex.repeat_x = tex.repeat_y = False
-            self.targets.append((tex, self.ctx.framebuffer(color_attachments=[tex])))
+        self.targets, self.history = [], []
+        for group, dtype in ((self.targets, "f1"), (self.history, "f2")):
+            for _ in range(2):
+                tex = self.ctx.texture((width, height), 4, dtype=dtype)
+                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                tex.repeat_x = tex.repeat_y = False
+                group.append((tex, self.ctx.framebuffer(color_attachments=[tex])))
         self.size = (width, height)
+        self.clear_history()
 
     def textures_for(self, paths: list[str]) -> moderngl.TextureArray | None:
         """Texture array for a scene's assets (cached by path and mtime), or None if it has none."""
@@ -169,28 +182,57 @@ class GlPipeline:
         fbo.clear(0.0, 0.0, 0.0, 1.0)
         self.scene_vao.render(moderngl.TRIANGLE_STRIP)
 
+    def clear_history(self) -> None:
+        """Forget the trail. Used whenever nothing is drawn at all, so a blackout cannot fade the
+        old picture back in when the show restarts."""
+        for _, fbo in self.history:
+            fbo.use()
+            fbo.clear(0.0, 0.0, 0.0, 1.0)
+
+    def blend(
+        self,
+        cal: Calibration,
+        *,
+        mix: float = 1.0,
+        transition: str = "cut",
+        decay: float = 0.0,
+    ) -> None:
+        """Put the two scene targets through the transition into the history buffer, keeping
+        ``decay`` of what was there last frame. ``decay`` 0 overwrites it, which is the no-trail case."""
+        src, dst = self._hist, 1 - self._hist
+        self.history[dst][1].use()
+        w, h = self.size
+        self.ctx.viewport = (0, 0, w, h)
+        p = self.blend_prog
+        self._set_calibration(p, cal)
+        self.targets[0][0].use(location=0)
+        self.targets[1][0].use(location=1)
+        self.history[src][0].use(location=2)
+        p["u_a"].value = 0
+        p["u_b"].value = 1
+        p["u_hist"].value = 2
+        p["u_mix"].value = mix
+        p["u_trans"].value = TRANSITION_ID[transition]
+        p["u_decay"].value = decay
+        self.blend_vao.render(moderngl.TRIANGLE_STRIP)
+        self._hist = dst
+
     def composite(
         self,
         dest: moderngl.Framebuffer,
         cal: Calibration,
         *,
-        mix: float = 1.0,
-        transition: str = "cut",
         master: float = 1.0,
         overlay: Overlay | None = None,
     ) -> None:
-        """Present target 1 (incoming / only scene), blended with target 0 while ``mix`` < 1."""
+        """Present the blended image, with master brightness and the calibration overlay on top."""
         dest.use()
         w, h = self.size
         self.ctx.viewport = (0, 0, w, h)
         p = self.comp_prog
         self._set_calibration(p, cal)
-        self.targets[0][0].use(location=0)
-        self.targets[1][0].use(location=1)
-        p["u_a"].value = 0
-        p["u_b"].value = 1
-        p["u_mix"].value = mix
-        p["u_trans"].value = TRANSITION_ID[transition]
+        self.history[self._hist][0].use(location=0)
+        p["u_image"].value = 0
         p["u_master"].value = master
         ov = overlay or Overlay()
         p["u_lines"].value = ov.lines if ov.lines else (-1.0, 0.0, 0.0, 0.0)

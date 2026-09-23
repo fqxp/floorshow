@@ -28,6 +28,7 @@ FADE_S = 0.4  # blackout fade
 OUTPUT_STALL_S = 1.5  # no frame presented for this long: the window is hidden or covered
 DEFAULT_TILE_DEG = 4.0
 CAL_SPIN_DPS = 24.0  # the confirmation step turns the grid at a mirror ball's pace: 15 s per revolution
+TRAIL_FLOOR = 0.02  # a trace counts as gone once it is this fraction of its brightness
 EASE = {
     "linear": lambda u: u,
     "in": lambda u: u * u,
@@ -84,6 +85,8 @@ class Core:
         self.params: dict[str, dict[str, Any]] = {}
         self.running = True
         self.master = 1.0
+        self.trail_s = 0.0  # how long what disappears keeps glowing; 0 = off
+        self._last_frame: float | None = None  # for the trail's per-frame decay
         self._level = 1.0  # blackout fade level, animated toward 1 (running) or 0 (stopped)
         self._level_time = now
         self.mode = "manual"
@@ -150,6 +153,7 @@ class Core:
             if self.current:
                 self._scene_start[self.current] = self.clock.snapshot(now).beat
         if first:
+            self.trail_s = self.config.trail.seconds  # afterwards trail.set owns it, so a reload cannot undo a live change
             self.mode = self.config.director.mode
             self.every_beats = self.config.director.every.in_beats(self.config.clock.beats_per_bar)
             self._last_slot = None
@@ -289,6 +293,8 @@ class Core:
         elif isinstance(cmd, P.BpmSet):
             if self.clock.source == "internal":
                 self.clock.use_internal(cmd.bpm, now)  # keeps the beat continuous
+        elif isinstance(cmd, P.TrailSet):
+            self.trail_s = cmd.seconds
         elif isinstance(cmd, P.TestPatternSet):
             self.test_pattern = cmd.on
         elif isinstance(cmd, P.MidiLearn):
@@ -461,6 +467,15 @@ class Core:
         the show keeps changing even if the display stalls; ``frame`` calls it too (idempotent)."""
         self._director_step(self.clock.snapshot(now), now)
 
+    def trail_decay(self, now: float) -> float:
+        """Fraction of the last frame that survives into this one, from the time between them, so a
+        trace lasts ``trail_s`` whatever the frame rate. 0 means no trail."""
+        last, self._last_frame = self._last_frame, now
+        if self.trail_s <= 0:
+            return 0.0
+        dt = max(0.0, now - last) if last is not None else 0.0
+        return TRAIL_FLOOR ** (dt / self.trail_s)
+
     def _tile(self) -> tuple[float, float | None]:
         b = self.config.ball
         if b.row_pitch_deg is None:
@@ -482,6 +497,9 @@ class Core:
     def frame(self, now: float, aspect: float = 16 / 9) -> FrameSpec:
         snap = self.clock.snapshot(now)
         cal = self.calibration(aspect)
+        # Always, so the gap does not pile up while calibrating or showing the test pattern, where
+        # the trail is deliberately off: nothing there should smear as you nudge it.
+        decay = self.trail_decay(now)
 
         if self.cal_owner is not None:
             pv = self._cal_preview
@@ -531,7 +549,7 @@ class Core:
                 outgoing = self._slot(self.previous, snap, now, 1.0)
         incoming = self._slot(self.current, snap, now, mix if tr is not None else 1.0)
         return FrameSpec(cal=cal, incoming=incoming, outgoing=outgoing, mix=mix, transition=ttype,
-                         master=master, black=black)
+                         master=master, black=black, trail_decay=decay)
 
     def next_change(self, snap) -> tuple[float, float] | tuple[None, None]:
         """(beat of the director's next scene change, length in beats of the period it ends), or (None, None)
@@ -570,6 +588,7 @@ class Core:
             "next_change_beat": next_change[0],
             "change_interval_beats": next_change[1],
             "master": self.master,
+            "trail_s": self.trail_s,
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
             "test_pattern": self.test_pattern,

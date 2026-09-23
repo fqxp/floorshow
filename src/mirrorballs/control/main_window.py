@@ -35,6 +35,7 @@ CONTROLS_MIN_H = 160
 COUNTDOWN_W = 120
 LIBRARY_CHECK_S = 1.0
 RESTART_DELAY_MS = 600  # let the old renderer release its socket before starting the new one
+TRAIL_MAX_S = 2.0  # the slider's top end; the protocol allows more, but a trail this long is already a smear
 
 
 def view_key(state: dict[str, Any]) -> str:
@@ -156,6 +157,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._param_widgets: dict[str, Any] = {}
         self._master_before_blackout = 0.85
         self._brightness_timer = 0
+        self._trail_timer = 0
         self._pending_scene: str | None = None
         self._every_hold = 0.0
         self._bpm_hold = 0.0
@@ -411,10 +413,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.blackout_btn = Gtk.ToggleButton()
         self.blackout_btn.add_css_class("mb-btn")
         self.blackout_btn.add_css_class("blackout")
-        self.blackout_btn.set_child(hbox(8, label("Blackout"), kbd("B"), halign=Gtk.Align.CENTER))
+        self.blackout_btn.set_child(hbox(8, label("Blackout"), kbd("Ctrl"), kbd("B"), halign=Gtk.Align.CENTER))
         self.blackout_btn.connect("toggled", self._on_blackout_toggled)
+        self.trail_label = label("Off", "secondary")
+        self.trail = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, TRAIL_MAX_S * 100, 5)
+        self.trail.set_draw_value(False)
+        self.trail.add_css_class("mb-scale")
+        self.trail.set_tooltip_text("How long what disappears keeps glowing. Smooths the movement without "
+                                    "softening the hit on the beat.")
+        # Set before connecting: building the window must not send anything or touch config.yaml.
+        self.trail.set_value(min(TRAIL_MAX_S, self.cfg.trail.seconds) * 100)  # what the renderer starts with
+        self._show_trail()
+        self.trail.connect("value-changed", self._on_trail_changed)
         panel = vbox(10, label("Master", "panel-title"),
                      vbox(4, hbox(0, label("Brightness", hexpand=True), self.brightness_label), self.brightness),
+                     vbox(4, hbox(0, label("Trail", hexpand=True), self.trail_label), self.trail),
                      self.blackout_btn)
         panel.add_css_class("panel")
         self.master_panel = panel
@@ -767,6 +780,29 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.source_remove(self._brightness_timer)
         self._brightness_timer = GLib.timeout_add(40, self._send_brightness, v)
 
+    def _show_trail(self) -> float:
+        seconds = self.trail.get_value() / 100
+        self.trail_label.set_text("Off" if seconds <= 0 else f"{seconds:.2f} s")
+        return seconds
+
+    def _on_trail_changed(self, *_a: Any) -> None:
+        seconds = self._show_trail()
+        if self._ui_guard:
+            return
+        if self._trail_timer:
+            GLib.source_remove(self._trail_timer)
+        self._trail_timer = GLib.timeout_add(40, self._send_trail, seconds)
+
+    def _send_trail(self, seconds: float) -> bool:
+        self._trail_timer = 0
+        self.send("trail.set", seconds=seconds)
+        try:  # the renderer takes it live; the file is only what it starts with next time
+            self.store.update({"trail": {"seconds": round(seconds, 3)}})
+            self.cfg = self.store.load()
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the setting: {e}")
+        return False
+
     def _send_brightness(self, v: float) -> bool:
         self._brightness_timer = 0
         if self.blackout_btn.get_active():
@@ -1043,6 +1079,13 @@ class MainWindow(Adw.ApplicationWindow):
         if st["master"] > 0.0:
             self._master_before_blackout = max(0.05, st["master"])
         self.blackout_btn.set_active(st["master"] <= 0.0)
+        pct = st.get("trail_s", 0.0) * 100
+        if not self.trail.has_focus() and self._trail_timer == 0 and abs(self.trail.get_value() - pct) > 0.5:
+            self._ui_guard = True
+            try:
+                self.trail.set_value(pct)
+            finally:
+                self._ui_guard = False
 
     def _refresh_banners(self, st: dict[str, Any] | None) -> None:
         items = vm.banners(self.connected, st)

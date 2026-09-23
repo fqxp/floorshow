@@ -449,3 +449,51 @@ def test_a_control_learn_ignores_the_clock_port(env):
     cmd(c, {"cmd": "midi.learn", "on": True})  # role defaults to control
     c.on_midi({"clock"}, bytes([0x90, 50, 100]), 100.0)
     assert c.take_outbox() == [] and c.learn
+
+
+def test_trail_decay_is_measured_in_seconds_not_frames(env):
+    c = make(env, "trail: {seconds: 0.25}\n")
+    assert c.trail_s == 0.25 and c.state(100.0)["trail_s"] == 0.25
+    c.trail_decay(100.0)  # first frame: no gap yet
+    slow = c.trail_decay(100.0 + 1 / 30)  # 30 fps
+    c.trail_decay(200.0)
+    fast = c.trail_decay(200.0 + 1 / 60)  # 60 fps: half the gap, so twice the survival per frame
+    assert fast == pytest.approx(slow ** 0.5, rel=1e-6)
+    # after a full trail's worth of time the trace is down to the floor, whatever the frame rate
+    c.trail_decay(300.0)
+    assert c.trail_decay(300.25) == pytest.approx(0.02, rel=1e-6)
+
+
+def test_trail_is_off_by_default_and_set_live(env):
+    c = make(env)
+    assert c.trail_s == 0.0
+    c.trail_decay(100.0)
+    assert c.trail_decay(100.1) == 0.0  # off: the history is overwritten rather than faded
+    assert cmd(c, {"cmd": "trail.set", "seconds": 0.4})["ok"]
+    c.trail_decay(101.0)
+    assert 0.0 < c.trail_decay(101.02) < 1.0
+    with pytest.raises(ValueError):
+        P.parse_command({"cmd": "trail.set", "seconds": 9})
+
+
+def test_a_live_trail_survives_a_reload(env):
+    """trail.set is a live control, like master; the file only seeds it at startup. Saving any other
+    setting reloads the config, and that must not undo what was just dialled in mid-show."""
+    c = make(env, "trail: {seconds: 0.1}\n")
+    cmd(c, {"cmd": "trail.set", "seconds": 0.6})
+    c.reload(100.0)
+    assert c.trail_s == 0.6
+
+
+def test_nothing_smears_while_calibrating_or_on_the_test_pattern(env):
+    c = make(env, "trail: {seconds: 0.5}\n")
+    c.frame(100.0)
+    assert c.frame(100.1).trail_decay > 0.0
+    cmd(c, {"cmd": "calibration.begin"}, client="cal")
+    assert c.frame(100.2).trail_decay == 0.0  # lines must not smear as they are nudged
+    cmd(c, {"cmd": "calibration.end", "commit": False}, client="cal")
+    cmd(c, {"cmd": "testpattern.set", "on": True})
+    assert c.frame(100.3).trail_decay == 0.0
+    cmd(c, {"cmd": "testpattern.set", "on": False})
+    # the gap did not pile up while it was off: one frame later is one frame's worth of decay
+    assert c.frame(100.4).trail_decay == pytest.approx(0.02 ** (0.1 / 0.5), rel=1e-6)

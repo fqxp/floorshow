@@ -214,6 +214,23 @@ def test_the_menu_actions_open_their_dialogs(win):
     w.show_shortcuts()  # the calibration keys moved out: that window shows them on its own buttons
 
 
+def test_the_trail_slider_applies_live_and_is_remembered(win, tmp_path):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    assert w.trail_label.get_text() == "Off"  # off unless the config says otherwise
+    w.trail.set_value(25)
+    assert w.trail_label.get_text() == "0.25 s"
+    assert pump_until(lambda: any(c == "trail.set" for c, _ in fake.sent))
+    assert ("trail.set", {"seconds": 0.25}) in fake.sent
+    assert load_config(tmp_path / "config.yaml").trail.seconds == 0.25  # kept for the next start
+    # the renderer owns the live value, and following its state sends nothing back
+    fake.sent.clear()
+    w.apply_state(st(trail_s=0.5))
+    assert w.trail.get_value() == 50 and w.trail_label.get_text() == "0.50 s"
+    assert not fake.sent
+
+
 def test_quit_renderer_is_disabled_while_no_renderer_runs(win):
     w, _ = win
     assert not w.lookup_action("quit-renderer").get_enabled()

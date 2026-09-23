@@ -142,9 +142,11 @@ def test_ctl_cli(rig, monkeypatch, capsys):
     assert "* c" in out and "  a" in out
     assert ctl_main.main(["mode", "random", "--bars", "2"]) == 0
     assert ctl_main.main(["param", "w", "7"]) == 0
+    assert ctl_main.main(["trail", "0.3"]) == 0
     assert ctl_main.main(["scene", "nope"]) == 1
     assert ctl_main.main(["state"]) == 0
     assert rig.core.mode == "random" and rig.core.every_beats == 8 and rig.core.params["c"]["w"] == 7.0
+    assert rig.core.trail_s == 0.3
     assert ctl_main.main(["quit"]) == 0
     time.sleep(0.05)
     assert rig.core.quit_requested

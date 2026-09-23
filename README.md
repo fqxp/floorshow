@@ -73,6 +73,13 @@ shows a banner, and the renderer writes every thread's Python stack to `~/.local
 (also on demand: `kill -USR1 <pid>`). `render.log` records window focus/minimise events, blocked swaps and
 every command with the client that sent it. `tools/swap_stall_repro.py` compares the two loop structures.
 
+**Trail.** Light snapping on and off on a mirror ball is a very big movement. The **Trail** slider
+(Master panel) fades out whatever disappears over up to two seconds, which reads as smooth without
+putting the hits behind the beat: something that lights up is still instantly at full brightness.
+It is off by default; `trail: {seconds: 0.25}` in config.yaml sets what the renderer starts with, and
+`mirrorballs-ctl trail 0.25` changes it live. A blackout stays instant, and nothing smears while
+calibrating.
+
 Only the projector-facing hemisphere of the ball is lit, so keep scene longitudes within about -90..90.
 
 ---

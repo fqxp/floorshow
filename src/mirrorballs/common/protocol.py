@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 4
+REV = 5
 
 
 class _Cmd(BaseModel):
@@ -60,6 +60,11 @@ class BpmSet(_Cmd):
 class MasterSet(_Cmd):
     cmd: Literal["master.set"]
     value: float = Field(ge=0, le=1)
+
+
+class TrailSet(_Cmd):
+    cmd: Literal["trail.set"]
+    seconds: float = Field(ge=0, le=3)  # how long what disappears keeps glowing; 0 = off
 
 
 class CalibrationBegin(_Cmd):
@@ -112,7 +117,7 @@ class Simple(_Cmd):
 
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
-    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | Simple,
+    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

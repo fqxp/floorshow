@@ -453,8 +453,14 @@ imports and strings. If you find yourself wanting them, the answer is usually `r
 
 **Scenes are pure functions of the clock.** Nothing carries over from the previous frame. Two
 consequences: a scene can start on any beat and look right immediately, and the same scene at the
-same beat always looks the same. It also means trails and particles are not expressible — that would
-need state, which the language does not have.
+same beat always looks the same. It also means a scene cannot remember anything, so effects that
+depend on previous frames — particles, a shape that chases where it has been — are not expressible.
+
+The one such effect that exists, **Trail**, is therefore not part of the language: it is a setting on
+the main window that the renderer applies to the finished image, fading out whatever disappears over
+a fraction of a second. It costs a scene nothing and needs no cooperation from it. Turn it up if the
+show feels like it is snapping on and off; what lights up still arrives instantly on the beat, only
+the going-away is slowed.
 
 **Everything is one primitive.** A band, a meridian, a ring and a circle are all an *annulus*: a
 centre direction plus an inner and outer angular radius. A band is an annulus around the north pole;

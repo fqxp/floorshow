@@ -36,12 +36,18 @@ def shape(**kw):
     return ShapeParams(**base)
 
 
+def present(pipe, dest, cal, *, mix=1.0, transition="cut", decay=0.0, master=1.0, overlay=None):
+    """The two output passes: the transition and trail into the history, then master and overlay out."""
+    pipe.blend(cal, mix=mix, transition=transition, decay=decay)
+    pipe.composite(dest, cal, master=master, overlay=overlay)
+    return pipe.read_rgb(dest).astype(int)
+
+
 def render(gl, shapes, cal, *, spin=None, textures=None, **comp):
     pipe, dest = gl
     pipe.render_scene(0, [], cal)
     pipe.render_scene(1, shapes, cal, spin=spin, textures=textures)
-    pipe.composite(dest, cal, **comp)
-    return pipe.read_rgb(dest).astype(int)
+    return present(pipe, dest, cal, **comp)
 
 
 CAL = Calibration.default(W / H)
@@ -117,8 +123,7 @@ def test_transitions_master_and_lines(gl):
     mid = (H // 2, W // 2)
 
     def comp(**kw):
-        pipe.composite(dest, CAL, **kw)
-        return pipe.read_rgb(dest).astype(int)
+        return present(pipe, dest, CAL, **kw)
 
     assert comp(mix=0.5, transition="crossfade")[mid].tolist() == pytest.approx([127, 0, 127], abs=2)
     assert comp(mix=0.5, transition="cut")[mid].tolist() == [0, 0, 255]
@@ -186,7 +191,7 @@ def _row_mismatches(gl, cal, mode, pitch, offset):
     pipe, dest = gl
     pipe.render_scene(0, [], cal)
     pipe.render_scene(1, [], cal)
-    pipe.composite(dest, cal, overlay=Overlay(rows=(mode, pitch, offset)))
+    present(pipe, dest, cal, overlay=Overlay(rows=(mode, pitch, offset)))
     img = pipe.read_rgb(dest).astype(int)
     exp = [[None] * W for _ in range(H)]  # None: outside the ball, or outside the zebra's +-60 degrees
     for y in range(H):
@@ -228,10 +233,69 @@ def test_crosshair_is_drawn_at_the_requested_place(gl):
     cal = Calibration.default(W / H)
     pipe.render_scene(0, [], cal)
     pipe.render_scene(1, [], cal)
-    pipe.composite(dest, cal, overlay=Overlay(crosshair=(0.25, 0.30)))
+    present(pipe, dest, cal, overlay=Overlay(crosshair=(0.25, 0.30)))
     img = pipe.read_rgb(dest).astype(int)
     cx, cy = int(0.25 * W), int(0.30 * H)
     assert img[cy, cx - 8].max() > 200 and img[cy - 8, cx].max() > 200  # the arms
     assert img[cy + 40, cx + 40].max() == 0 and img[H // 2, W // 2].max() == 0
-    pipe.composite(dest, cal, overlay=Overlay())
+    present(pipe, dest, cal, overlay=Overlay())
     assert pipe.read_rgb(dest).max() == 0  # off by default
+
+
+def test_the_trail_slows_disappearance_but_not_appearance(gl):
+    """What lights up is instantly at full brightness; what goes away fades. That asymmetry is the
+    point: a trail that also smoothed the onset would put every hit behind the beat."""
+    pipe, dest = gl
+    mid = (H // 2, W // 2)
+    pipe.render_scene(0, [], CAL)
+
+    # lighting up is instant even with a long trail
+    pipe.render_scene(1, [shape(color=(1, 1, 1))], CAL)
+    assert present(pipe, dest, CAL, decay=0.9)[mid].tolist() == [255, 255, 255]
+
+    # going away fades, one frame at a time, and reaches black
+    pipe.render_scene(1, [], CAL)
+    faded = [present(pipe, dest, CAL, decay=0.5)[mid][0] for _ in range(4)]
+    assert faded == sorted(faded, reverse=True) and faded[0] < 255
+    assert faded[0] == pytest.approx(127, abs=2) and faded[-1] < 20
+    for _ in range(12):
+        present(pipe, dest, CAL, decay=0.5)
+    assert present(pipe, dest, CAL, decay=0.5)[mid].tolist() == [0, 0, 0]
+
+
+def test_a_long_trail_still_reaches_black(gl):
+    """The longest trail decays by only ~4% per frame. In an 8-bit history that rounds back to the
+    same value once the pixel is dim, and the ghost never leaves; the history is f16 for this."""
+    pipe, dest = gl
+    mid = (H // 2, W // 2)
+    pipe.render_scene(0, [], CAL)
+    pipe.render_scene(1, [shape(color=(1, 1, 1))], CAL)
+    present(pipe, dest, CAL, decay=0.96)
+    pipe.render_scene(1, [], CAL)
+    for _ in range(400):  # ~13 s at 30 fps, far longer than the 3 s maximum
+        last = present(pipe, dest, CAL, decay=0.96)
+    assert last[mid].tolist() == [0, 0, 0]
+
+
+def test_no_trail_is_the_old_behaviour_and_master_is_not_smeared(gl):
+    pipe, dest = gl
+    mid = (H // 2, W // 2)
+    pipe.render_scene(0, [], CAL)
+    pipe.render_scene(1, [shape(color=(1, 1, 1))], CAL)
+    present(pipe, dest, CAL, decay=0.9)
+    # blackout is instant: master applies after the trail, so a panic really does go dark
+    assert present(pipe, dest, CAL, decay=0.9, master=0.0)[mid].tolist() == [0, 0, 0]
+    # and with decay 0 a vanished shape leaves nothing at all
+    pipe.render_scene(1, [], CAL)
+    assert present(pipe, dest, CAL, decay=0.0)[mid].tolist() == [0, 0, 0]
+
+
+def test_clearing_the_history_forgets_the_trail(gl):
+    pipe, dest = gl
+    mid = (H // 2, W // 2)
+    pipe.render_scene(0, [], CAL)
+    pipe.render_scene(1, [shape(color=(1, 1, 1))], CAL)
+    present(pipe, dest, CAL, decay=0.9)
+    pipe.clear_history()
+    pipe.render_scene(1, [], CAL)
+    assert present(pipe, dest, CAL, decay=0.9)[mid].tolist() == [0, 0, 0]

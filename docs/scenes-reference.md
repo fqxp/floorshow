@@ -294,6 +294,16 @@ meridians and off-axis shapes move. Layers with `frame: world` ignore the spin.
 
 ---
 
+## What a scene does not control
+
+**Trail** (main window, Master panel) fades out whatever disappears, over up to two seconds. The
+renderer applies it to the finished image, after the transition and before master brightness, so it
+is the same for every scene and no scene can opt out. A shape that lights up is still instantly at
+full brightness; only its disappearance is slowed, and a moving shape leaves a tail along its path.
+It is off during calibration and the test pattern, and a blackout is still instant.
+
+---
+
 ## Errors
 
 A file that does not load is **not** applied; the previously loaded version of that scene keeps
