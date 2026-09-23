@@ -18,21 +18,12 @@ from . import config_model as cm  # noqa: E402
 from . import viewmodel as vm  # noqa: E402
 from .midi_ports import list_input_ports  # noqa: E402
 from .widgets import (  # noqa: E402
-    Segmented, SettingsGroup, Stepper, hbox, icon, label, push_button, set_classes, setting_row, status_chip, vbox,
+    Segmented, SettingsGroup, Stepper, dropdown, hbox, icon, label, push_button, set_classes, setting_row, status_chip,
+    vbox,
 )
 
 TABS = ["Clock", "MIDI"]
 SAVE_DELAY_MS = 250
-
-
-def dropdown(options: list[str], selected: int = 0, width: int = 210, on_change: Any = None) -> Gtk.DropDown:
-    dd = Gtk.DropDown.new_from_strings(options or [""])
-    dd.add_css_class("mb-dd")
-    dd.set_size_request(width, 36)
-    dd.set_selected(max(0, selected))
-    if on_change:
-        dd.connect("notify::selected", lambda d, _p: on_change(d.get_selected()))
-    return dd
 
 
 class PreferencesDialog(Adw.Window):

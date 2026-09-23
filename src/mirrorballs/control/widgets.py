@@ -72,6 +72,17 @@ def push_button(text: str, *classes: str, kbd_text: str | None = None, icon_name
 
 
 
+def dropdown(options: list[str], selected: int = 0, width: int = 210,
+             on_change: Callable[[int], None] | None = None) -> Gtk.DropDown:
+    dd = Gtk.DropDown.new_from_strings(options or [""])
+    dd.add_css_class("mb-dd")
+    dd.set_size_request(width, 36)
+    dd.set_selected(max(0, selected))
+    if on_change:
+        dd.connect("notify::selected", lambda d, _p: on_change(d.get_selected()))
+    return dd
+
+
 class Stepper(Gtk.Box):
     """[-] value [+] control (design: 132 px wide). ``fmt`` renders the value; ``on_change`` gets the new one."""
 
@@ -108,6 +119,69 @@ class Stepper(Gtk.Box):
         self.minus.set_sensitive(self.value > self.lo)
         self.plus.set_sensitive(self.value < self.hi)
 
+
+class SizeChoice(Gtk.Box):
+    """A measurement picked from the few sizes that are actually sold, with "Other…" for the rest.
+
+    Most rigs use one of a handful of values, and picking one from a list beats holding down a [+]
+    button. "Other…" reveals a stepper, which is also how a value that is not in the list arrives.
+    """
+
+    OTHER = "Other…"
+
+    def __init__(self, values: list[float], value: float, unit: str, lo: float, hi: float, step: float = 1,
+                 on_change: Callable[[float], None] | None = None):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.values, self.unit, self.on_change = values, unit, on_change
+        self.value = value
+        self._guard = True
+        self.stepper = Stepper(value, lo, hi, step, lambda v: f"<b>{v:g}</b> {unit}", self._on_stepper, width=132)
+        self.dd = dropdown([f"{v:g} {unit}" for v in values] + [self.OTHER], self._index_of(value), 124, self._on_pick)
+        self.append(self.dd)
+        self.append(self.stepper)
+        self.stepper.set_visible(value not in values)
+        self._guard = False
+
+    def _index_of(self, value: float) -> int:
+        return self.values.index(value) if value in self.values else len(self.values)
+
+    def set_value(self, value: float) -> None:
+        """Set without telling anyone: for a reset, or for loading."""
+        self._guard = True
+        try:
+            self.value = value
+            self.dd.set_selected(self._index_of(value))
+            self.stepper.set_value(value)
+            self.stepper.set_visible(value not in self.values)
+        finally:
+            self._guard = False
+
+    def choose(self, value: float) -> None:
+        """Pick a value the way the user would: the list follows it and the change is announced."""
+        self.set_value(value)
+        if self.on_change:
+            self.on_change(value)
+
+    def _on_pick(self, index: int) -> None:
+        if self._guard:
+            return
+        other = index >= len(self.values)
+        self.stepper.set_visible(other)
+        self.value = self.stepper.value if other else self.values[index]
+        if self.on_change:
+            self.on_change(self.value)
+
+    def _on_stepper(self, value: float) -> None:
+        if self._guard:
+            return
+        self.value = value
+        self._guard = True  # a stepped value may land on one of the listed sizes; the list follows it
+        try:
+            self.dd.set_selected(self._index_of(value))
+        finally:
+            self._guard = False
+        if self.on_change:
+            self.on_change(value)
 
 class Segmented(Gtk.Box):
     """Two or more mutually exclusive buttons (the design's segmented control)."""

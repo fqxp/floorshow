@@ -24,6 +24,7 @@ from mirrorballs.common.config import load_config
 from mirrorballs.control.client import RendererClient
 from mirrorballs.control.library import Library
 from mirrorballs.control.main_window import MainWindow
+from mirrorballs.control.calibration import DIAMETERS_CM
 from mirrorballs.control.store import ConfigStore
 
 from test_render_io import Rig  # noqa: E402  (real IPC server + Core on a thread)
@@ -882,12 +883,12 @@ def test_the_balls_size_seeds_the_pitch_and_is_remembered(cfgwin):
     w.open_calibration()
     cal = w.calibration_window
     cal._go(4)
-    assert cal.diameter_step.value == 30 and cal.tile_step.value == 10  # placeholders until they are typed
+    assert cal.diameter_step.value == 30 and cal.tile_step.value == 10  # placeholders until one is picked
     assert cal.rows.pitch == 4.0  # nothing on file: the default pitch, not one derived from the placeholders
-    cal.diameter_step.set_value(50, notify=True)
+    cal.diameter_step.choose(50)
     assert cal.rows.pitch == pytest.approx(180 / (3.14159265 * 500 / 20), rel=0.01)  # a 50 cm ball, 10 mm tiles
     assert last_preview(fake)["rows"]["pitch_deg"] == pytest.approx(cal.rows.pitch)
-    cal.tile_step.set_value(20, notify=True)
+    cal.tile_step.choose(20)
     assert cal.rows.pitch == pytest.approx(2 * 180 / (3.14159265 * 500 / 20), rel=0.01)  # twice the tile, twice the pitch
     cal._go(5)
     cal.finish()
@@ -905,11 +906,11 @@ def test_the_ball_step_holds_the_hardware_and_seeds_the_rows(cfgwin):
     w.open_calibration()
     cal = w.calibration_window
     assert cal.step_no == 1 and (cal.diameter_step.value, cal.tile_step.value) == (30, 10)
-    assert cal.rows_hint.get_text() == "≈ 47 rows · 3.8° each"  # what the placeholders imply
     assert last_preview(fake).get("lines", True) is True  # the silhouette lines, as on step 2
-    cal.diameter_step.set_value(50, notify=True)
-    cal.tile_step.set_value(20, notify=True)
-    assert cal.rows_hint.get_text() == "≈ 39 rows · 4.6° each"
+    # the sizes are picked from the list, not typed: 50 cm is the last entry, 20 mm the fourth
+    cal.diameter_step.choose(50)
+    cal.tile_step.choose(20)
+    assert (cal.ball_diameter, cal.ball_tile) == (50, 20) and not cal.diameter_step.stepper.get_visible()
     cal._go(4)  # the rows step starts from the measurements, without them being typed there
     assert cal.rows.pitch == pytest.approx(cal._seeded_pitch(), abs=1e-6)
     cal._go(5)
@@ -919,6 +920,26 @@ def test_the_ball_step_holds_the_hardware_and_seeds_the_rows(cfgwin):
     b = load_config(tmp / "config.yaml").ball
     assert (b.diameter_cm, b.tile_mm, b.rotation_rpm) == (50, 20, 0.0)
     assert b.row_pitch_deg == pytest.approx(cal._seeded_pitch(), abs=1e-3)
+
+
+def test_an_unusual_ball_size_goes_in_under_other(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_calibration()
+    cal = w.calibration_window
+    dia = cal.diameter_step
+    assert not dia.stepper.get_visible() and dia.dd.get_selected() == DIAMETERS_CM.index(30.0)
+    dia._on_pick(len(DIAMETERS_CM))  # "Other…": the stepper appears to hold whatever is not in the list
+    assert dia.stepper.get_visible()
+    dia.stepper.set_value(37, notify=True)
+    assert (dia.value, cal.ball_diameter) == (37, 37) and dia.dd.get_selected() == len(DIAMETERS_CM)
+    cal._go(5)
+    assert cal.done_ball.get_text().startswith("37 cm")
+    cal.finish()
+    assert load_config(tmp / "config.yaml").ball.diameter_cm == 37
+    # reopening finds it again, still under "Other…"
+    w.open_calibration()
+    dia = w.calibration_window.diameter_step
+    assert dia.value == 37 and dia.stepper.get_visible() and dia.dd.get_selected() == len(DIAMETERS_CM)
 
 
 def test_the_ball_step_records_the_rotation_direction_and_speed(cfgwin):

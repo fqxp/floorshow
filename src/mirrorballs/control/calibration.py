@@ -12,6 +12,8 @@ import math
 from datetime import datetime
 from typing import Any
 
+import cairo
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -29,12 +31,14 @@ from .calibration_model import (  # noqa: E402
     Session, axis_key_to_action, ball_key_to_action, done_key_to_action, fmt_px, key_to_action, rows_key_to_action,
 )
 from .widgets import (  # noqa: E402
-    Segmented, SettingsGroup, Stepper, hbox, icon, kbd, label, push_button, set_classes, setting_row, vbox,
+    Segmented, SettingsGroup, SizeChoice, Stepper, hbox, icon, kbd, label, push_button, set_classes, setting_row, vbox,
 )
 
 BEGIN_TIMEOUT_S = 1.5  # wait this long for the renderer to report its window size before assuming 1920x1080
 SPIN_DPS, SPIN_TICK_MS = 24.0, 50  # the confirmation globe turns at the renderer's rate (core.CAL_SPIN_DPS)
 DEFAULT_DIAMETER_CM, DEFAULT_TILE_MM, DEFAULT_RPM = 30.0, 10.0, 1.5  # what step 1 offers before anything is measured
+DIAMETERS_CM = [20.0, 25.0, 30.0, 40.0, 50.0]  # the sizes actually sold; anything else goes in under "Other…"
+TILES_MM = [5.0, 10.0, 15.0, 20.0, 25.0]
 
 
 class Diagram(Gtk.DrawingArea):
@@ -175,6 +179,94 @@ class BallDiagram(Gtk.DrawingArea):
                 cr.move_to(x + dx * 0.4, y + dy * 0.4)
                 cr.line_to(x + dx, y + dy)
             cr.stroke()
+
+
+def _facet(ix: int, iy: int) -> float:
+    """A fixed pseudo-random number per tile, so the artwork looks scattered but never changes."""
+    return (((ix * 73856093) ^ (iy * 19349663)) % 997) / 996.0
+
+
+class BallArtwork(Gtk.DrawingArea):
+    """A mirror ball throwing its beams through haze. Not a diagram and not accurate: it is here to say
+    what all this is for. Always drawn in the dark palette, because it is a picture of a dark room."""
+
+    BEAMS = ((-166, 5), (-131, 8), (-97, 4), (-58, 9), (-24, 5), (14, 7), (49, 4), (86, 9), (121, 5), (155, 7))
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_content_width(196)
+        self.set_content_height(132)
+        self.set_valign(Gtk.Align.START)
+        self.set_draw_func(self._draw)
+
+    def _draw(self, _a: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
+        pal, rgb = tokens.DARK, tokens.hex_to_rgb
+        acc, far = rgb(pal["acc"]), math.hypot(w, h)
+        cx, cy, r = w * 0.5, h * 0.42, min(w, h) * 0.2
+        rad = 10.0
+        cr.new_path()  # the room, with the artwork's own rounded corners
+        for sx, sy, a0 in ((w - rad, h - rad, 0.0), (rad, h - rad, 0.5), (rad, rad, 1.0), (w - rad, rad, 1.5)):
+            cr.arc(sx, sy, rad, a0 * math.pi, (a0 + 0.5) * math.pi)
+        cr.close_path()
+        cr.set_source_rgb(*rgb(pal["well"]))
+        cr.fill_preserve()
+        cr.clip()
+
+        haze = cairo.RadialGradient(cx, cy, r * 0.5, cx, cy, far * 0.8)
+        haze.add_color_stop_rgba(0.0, *acc, 0.20)
+        haze.add_color_stop_rgba(1.0, *acc, 0.0)
+        cr.set_source(haze)
+        cr.paint()
+
+        for i in range(34):  # the spots the ball throws around the room
+            x, y = _facet(i, 7) * w, _facet(i, 13) * h
+            d = math.hypot(x - cx, y - cy) / far
+            cr.set_source_rgba(*rgb(pal["t1"]), 0.10 + 0.35 * max(0.0, 1.0 - d * 2.2))
+            cr.rectangle(x, y, 2.5, 2.5)
+            cr.fill()
+
+        for angle, spread in self.BEAMS:
+            a = math.radians(angle)
+            # three wedges inside each other instead of one: a beam in haze has no edge, it just thins out
+            for widen, peak in ((1.7, 0.09), (1.0, 0.13), (0.45, 0.17)):
+                half = math.radians(spread) * widen
+                beam = cairo.LinearGradient(cx, cy, cx + math.cos(a) * far, cy + math.sin(a) * far)
+                beam.add_color_stop_rgba(0.0, *tokens.mix(pal["acc"], pal["t1"], 0.55), 0.0)
+                beam.add_color_stop_rgba(0.10, *tokens.mix(pal["acc"], pal["t1"], 0.45), peak * 2)  # hot at the ball
+                beam.add_color_stop_rgba(0.45, *acc, peak)
+                beam.add_color_stop_rgba(1.0, *acc, 0.0)
+                cr.move_to(cx + math.cos(a - half) * r, cy + math.sin(a - half) * r)
+                cr.line_to(cx + math.cos(a - half) * far, cy + math.sin(a - half) * far)
+                cr.line_to(cx + math.cos(a + half) * far, cy + math.sin(a + half) * far)
+                cr.line_to(cx + math.cos(a + half) * r, cy + math.sin(a + half) * r)
+                cr.close_path()
+                cr.set_source(beam)
+                cr.fill()
+
+        cr.save()  # the ball: square facets, brightest where the projector hits it
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.clip()
+        cell = r * 0.27
+        hx, hy = cx - r * 0.4, cy - r * 0.45
+        n = int(r / cell) + 2
+        for iy in range(-n, n + 1):
+            for ix in range(-n, n + 1):
+                x, y = cx + ix * cell, cy + iy * cell
+                f = _facet(ix, iy)
+                lit = max(0.0, 1.0 - math.hypot(x - hx, y - hy) / (2.4 * r)) ** 1.3
+                lit *= 0.25 + 0.75 * f + (0.9 if f > 0.93 else 0.0)  # a few facets catch the light head on
+                cr.set_source_rgb(*tokens.mix(pal["bg2"], pal["t1"], min(1.0, lit)))
+                cr.rectangle(x - cell / 2 + 0.5, y - cell / 2 + 0.5, cell - 1, cell - 1)
+                cr.fill()
+        cr.restore()
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*rgb(pal["t1"]), 0.35)
+        cr.set_line_width(1)
+        cr.stroke()
+        cr.move_to(cx, cy - r)  # the hanger, which is where step 3 looks for the pole
+        cr.line_to(cx, 0)
+        cr.set_source_rgba(*rgb(pal["t3"]), 0.8)
+        cr.stroke()
 
 
 class CalibrationWindow(Adw.Window):
@@ -339,30 +431,26 @@ class CalibrationWindow(Adw.Window):
         self.ball_tile = b.tile_mm or DEFAULT_TILE_MM
         self.ball_rotation_rpm = b.rotation_rpm
         self._ball_initial = (self.ball_diameter, self.ball_tile, self.ball_rotation_rpm)
-        self.diameter_step = Stepper(self.ball_diameter, 5, 200, 1, lambda v: f"<b>{v:.0f}</b> cm",
-                                     lambda v: self._ball_changed(diameter=v), width=140)
-        self.tile_step = Stepper(self.ball_tile, 2, 50, 1, lambda v: f"<b>{v:.0f}</b> mm",
-                                 lambda v: self._ball_changed(tile=v), width=140)
-        self.rows_hint = label("", "secondary")
+        self.diameter_step = SizeChoice(DIAMETERS_CM, self.ball_diameter, "cm", 5, 200, 1,
+                                        lambda v: self._ball_changed(diameter=v))
+        self.tile_step = SizeChoice(TILES_MM, self.ball_tile, "mm", 2, 50, 1, lambda v: self._ball_changed(tile=v))
         self.rotation_seg = Segmented([("still", "Still"), ("right", "Turns right"), ("left", "Turns left")],
                                       self._rotation_key(), lambda k: self._ball_changed(direction=k))
         self.speed_step = Stepper(abs(self.ball_rotation_rpm) or DEFAULT_RPM, 0.1, 20, 0.1,
-                                  lambda v: f"<b>{v:.1f}</b> rpm", lambda v: self._ball_changed(rpm=v), width=140)
+                                  lambda v: f"<b>{v:.1f}</b> rpm", lambda v: self._ball_changed(rpm=v), width=132)
         self.speed_hint = label("", "secondary")
 
-        intro = label("Rough values are enough. Nothing on this page has to be exact \u2014 it only gives the steps "
-                      "that follow somewhere to start, and you refine them there by looking at the real ball.",
-                      "secondary", wrap=True)
-        size = SettingsGroup("The ball")
-        size.add(setting_row("Diameter", None, self.diameter_step))
-        size.add(setting_row("Tile size", None, self.tile_step))
-        size.add(setting_row("Tile rows", "Worked out from the two above. The tile rows step starts here.",
-                             self.rows_hint))
-        turn = SettingsGroup("Rotation", "If a motor turns the ball. Noted down for later features; it changes "
-                                        "nothing in the show yet.")
-        turn.add(setting_row("Direction", "As seen facing the ball.", self.rotation_seg))
-        turn.add(setting_row("Speed", None, self.speed_hint, self.speed_step))
-        return vbox(18, intro, size, turn, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
+        hero = hbox(18, BallArtwork(), label(
+            "Nothing here has to be exact. These are the numbers the steps that follow start from, and you "
+            "settle them there by looking at the real ball in the real room.", "lead", wrap=True, hexpand=True),
+            valign=Gtk.Align.CENTER)
+        g = SettingsGroup()
+        g.add(setting_row("Stated diameter", "The size on the box.", self.diameter_step))
+        g.add(setting_row("Tile size", "The little mirrors. Usually 10 mm.", self.tile_step))
+        g.add(setting_row("Rotation", "Which way it turns, facing the ball. Nothing uses it yet.", self.rotation_seg))
+        g.add(setting_row("Stated speed", "What the motor claims. Close enough is fine.",
+                          self.speed_hint, self.speed_step))
+        return vbox(16, hero, g, margin_start=24, margin_end=24, margin_top=4, margin_bottom=8, vexpand=True)
 
     def _rotation_key(self) -> str:
         r = self.ball_rotation_rpm
@@ -566,7 +654,7 @@ class CalibrationWindow(Adw.Window):
     # --- steps 2 and 3 -------------------------------------------------------------------
 
     INSTRUCTIONS = {
-        STEP_BALL: "Tell us about the ball. Rough values are enough.",
+        STEP_BALL: "Tell us about the ball.",
         STEP_SILHOUETTE: "Move each line until it just touches the edge of the ball.",
         STEP_AXIS: "Move the crosshair onto the hanger eyelet at the top of the ball.",
         STEP_ROWS: "Nudge the rows until the projected stripes line up with the mirror tiles.",
@@ -759,8 +847,6 @@ class CalibrationWindow(Adw.Window):
 
     def _update_ball(self) -> None:
         """Step 1 describes the hardware, so it reads the same with or without a renderer."""
-        rows = cm.rows_from_tile(self.ball_diameter, self.ball_tile)
-        self.rows_hint.set_text(f"≈ {rows:.0f} rows · {self._seeded_pitch():.1f}° each")
         turning = self.ball_rotation_rpm != 0
         self.rotation_seg.select(self._rotation_key())
         self.speed_step.set_sensitive(turning)
