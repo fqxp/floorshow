@@ -854,13 +854,14 @@ def test_rows_step_nudges_and_persists(cfgwin):
     cal._rows_act("step", "coarse")
     cal._rows_act("offset", +1)
     cal._rows_act("pitch", +1)
-    cal._rows_set_pattern("single")
+    cal._rows_set_pattern("equator")
     p = last_preview(fake)
-    assert p["rows"] == {"mode": "single", "pitch_deg": 4.1, "offset_deg": 1.0} and cal.rows_step.selected() == "coarse"
-    assert cal.read_rows.get_text() == "≈ 44 rows · 4.10° each" and cal.read_shift.get_text() == "+0.24 rows"
+    # coarse shift = a quarter of a row, and a row is now 4.1 degrees
+    assert p["rows"] == {"mode": "equator", "pitch_deg": 4.1, "offset_deg": 1.025} and cal.rows_step.selected() == "coarse"
+    assert cal.read_rows.get_text() == "≈ 44 rows · 4.10° each" and cal.read_shift.get_text() == "+0.25 rows"
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
-    assert (b.row_pitch_deg, b.row_offset_deg) == (4.1, 1.0)
+    assert (b.row_pitch_deg, b.row_offset_deg) == (4.1, 1.025)
 
 
 def test_rows_start_from_the_configured_ball_size_and_back_navigation(cfgwin):
@@ -1033,7 +1034,8 @@ def test_resetting_the_rows_step_switches_snapping_off_again(cfgwin):
     cal._go(5)
     assert cal.done_rows.get_text().startswith("≈")
     cal.finish()
-    assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(1.2)
+    # a tenth of a row on top of the saved 1.0 degrees, with the shift itself kept to four decimals
+    assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(1.3802)
     w.open_calibration()
     cal = w.calibration_window
     cal._go(4)
@@ -1056,9 +1058,11 @@ def test_step_keys_reach_the_right_handlers(cfgwin):
     cal._axis_act(*axis_key_to_action("Down"))
     assert cal.axis.py < 1.0
     cal._go(4)
-    before = cal.rows.offset
+    before = cal.rows.shift
     cal._rows_act(*rows_key_to_action("Up"))
-    assert cal.rows.offset == pytest.approx(before + 0.2)
+    assert cal.rows.shift == pytest.approx(before + 0.1)  # one tenth of a row, whatever the pitch
+    cal._rows_reset_shift()
+    assert cal.rows.shift == 0.0
     cal._rows_act(*rows_key_to_action("z"))
     assert cal.rows.mode == "equator"
 

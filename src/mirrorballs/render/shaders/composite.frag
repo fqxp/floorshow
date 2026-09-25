@@ -14,7 +14,8 @@ out vec4 fragColor;
 const float MARK_HALF_PX = 5.0;  // the tangent marks are ten pixels long
 
 // Tile rows are painted, not outlined: neighbouring rows differ in colour, so every row boundary is an edge
-// you can line up against a real one. The row holding the equator gets its own colour to anchor the offset.
+// you can line up against a real one. The row holding the equator gets its own colour to anchor the shift, and
+// the rest alternate outwards from it, so shifting the grid past half a row never repaints the whole ball.
 // calibration.py's ROW_TINTS mirrors these for the on-screen preview.
 const vec3 ROW_A = vec3(0.00, 0.85, 0.75);
 const vec3 ROW_B = vec3(0.90, 0.00, 0.70);
@@ -82,7 +83,7 @@ void main() {
             bool isEq = abs(band - eq) < 0.5;
             // Edges stay hard: a blurred boundary is exactly what you cannot line up against a tile seam.
             float lit = u_rows.x < 1.5 ? step(abs(lat), u_rows.w) : float(isEq);
-            vec3 tint = isEq ? ROW_EQUATOR : (mod(band, 2.0) < 0.5 ? ROW_A : ROW_B);
+            vec3 tint = isEq ? ROW_EQUATOR : (mod(band - eq, 2.0) < 0.5 ? ROW_A : ROW_B);
             col = max(col, tint * lit);
         }
     }

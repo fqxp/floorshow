@@ -29,7 +29,7 @@ from . import tokens  # noqa: E402
 from .calibration_model import (  # noqa: E402
     DEFAULT_PITCH, DEFAULT_SIZE, ROW_TINTS, STEP_AXIS, STEP_BALL, STEP_DONE, STEP_ROWS, STEP_SILHOUETTE, AxisSession,
     RowsSession, Session, axis_key_to_action, ball_key_to_action, done_key_to_action, fmt_px, key_to_action,
-    parity_offset, rows_key_to_action,
+    parity_shift, rows_key_to_action,
 )
 from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, SizeChoice, Stepper, hbox, icon, kbd, label, push_button, set_classes, setting_row, vbox,
@@ -108,6 +108,7 @@ class BallDiagram(Gtk.DrawingArea):
         self.cross: tuple[float, float] | None = None  # pole marker in units of the ball radius (x right, y up)
         self.rows: tuple[float, float, str] | None = None  # pitch, offset, mode
         self.rows_limit = 60.0  # matches gl.ROWS_LIMIT_DEG
+        self.label_equator = True  # off on the confirmation globe, where the line needs no naming
         self.dark = True
         self.set_draw_func(self._draw)
 
@@ -165,7 +166,7 @@ class BallDiagram(Gtk.DrawingArea):
             eq = [self._project(0, lon) for lon in range(-180, 181, 4)]
             self._curve(cr, eq, cx, cy, r)
             cr.stroke()
-            vis = [(x, y) for x, y, v in eq if v]
+            vis = [(x, y) for x, y, v in eq if v] if self.label_equator else []
             if vis:
                 x, y = min(vis)
                 cr.select_font_face("sans")
@@ -181,7 +182,7 @@ class BallDiagram(Gtk.DrawingArea):
                 is_eq = k == equator_band
                 if mode == "equator" and not is_eq:
                     continue
-                tint = ROW_TINTS["equator"] if is_eq else ROW_TINTS["a" if k % 2 == 0 else "b"]
+                tint = ROW_TINTS["equator"] if is_eq else ROW_TINTS["a" if (k - equator_band) % 2 == 0 else "b"]
                 if self._band(cr, offset + k * pitch, offset + (k + 1) * pitch, cx, cy, r):
                     cr.set_source_rgba(*tint, 0.9)
                     cr.fill()
@@ -334,7 +335,7 @@ class CalibrationWindow(Adw.Window):
         self.banner_box = vbox(0)
         view.add_top_bar(self.banner_box)
 
-        self.instruction = label(self.INSTRUCTIONS[STEP_BALL], "lead", xalign=0.5, wrap=True)
+        self.instruction = label(self.INSTRUCTIONS[STEP_BALL], "instruction", xalign=0.5, wrap=True)
         self.instruction.set_margin_start(32)
         self.instruction.set_margin_end(32)
         self.instruction.set_visible(bool(self.INSTRUCTIONS[STEP_BALL]))
@@ -518,19 +519,25 @@ class CalibrationWindow(Adw.Window):
         self.rows_diagram = BallDiagram()
         self.read_rows = label("", "secondary")
         self.read_shift = label("", "secondary")
-        self.rows_from_ball = label("", "secondary")  # what step 1's measurements make the starting pitch
         left = vbox(12, self.rows_diagram,
                     vbox(4, hbox(8, label("Rows", hexpand=True), self.read_rows),
-                         hbox(8, label("Shift", hexpand=True), self.read_shift)),
-                    label("Read only. Worked out from the pitch and the shift.", "hint", wrap=True), width_request=270)
+                         hbox(8, label("Shift", hexpand=True), self.read_shift)), width_request=270)
 
-        def nudge(name: str, sub: str, neg: tuple[str, str, Any], pos: tuple[str, str, Any]) -> Gtk.Widget:
+        def nudge(name: str, sub: str, neg: tuple[str, str, Any], pos: tuple[str, str, Any],
+                  back: tuple[str, Any] | None = None) -> Gtk.Widget:
             row = hbox(6, vbox(2, label(name), label(sub, "hint")), Gtk.Box(hexpand=True))
             for key, ic, act in (neg, pos):
                 b = Gtk.Button(icon_name=ic)
                 b.add_css_class("mb-btn")
                 b.connect("clicked", lambda _b, a=act: self._rows_act(*a))
                 row.append(hbox(4, b, kbd(key)))
+            if back is not None:  # no shortcut: it throws away nudging, which is too easy to hit by accident
+                tip, fn = back
+                b = Gtk.Button(icon_name="edit-undo-symbolic")
+                b.add_css_class("mb-btn")
+                b.set_tooltip_text(tip)
+                b.connect("clicked", lambda _b: fn())
+                row.append(b)
             return row
 
         self.rows_step = Segmented([("fine", "Fine"), ("normal", "Normal"), ("coarse", "Coarse")], "normal", lambda k: self._rows_act("step", k))
@@ -538,12 +545,12 @@ class CalibrationWindow(Adw.Window):
                                      lambda k: self._rows_set_pattern(k))
         right = vbox(
             12,
-            nudge("Shift", "up / down", ("↑", "go-up-symbolic", ("offset", +1)), ("↓", "go-down-symbolic", ("offset", -1))),
-            nudge("Pitch", "narrower / wider", ("←", "go-previous-symbolic", ("pitch", -1)), ("→", "go-next-symbolic", ("pitch", +1))),
+            nudge("Shift", "up / down", ("↑", "go-up-symbolic", ("offset", +1)), ("↓", "go-down-symbolic", ("offset", -1)),
+                  ("Shift back to none", self._rows_reset_shift)),
+            nudge("Pitch", "narrower / wider", ("←", "go-previous-symbolic", ("pitch", -1)),
+                  ("→", "go-next-symbolic", ("pitch", +1)), ("Pitch back to the ball's size", self._rows_reset_pitch)),
             hbox(12, label("Step", hexpand=True), self.rows_step),
             vbox(6, vbox(0, label("Pattern"), label("shown on the ball", "hint")), self.pattern_seg),
-            vbox(4, vbox(0, label("Starting pitch"), label("From the ball's size, set on step 1", "hint", wrap=True)),
-                 self.rows_from_ball),
             hexpand=True,
         )
         return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
@@ -585,6 +592,7 @@ class CalibrationWindow(Adw.Window):
 
     def _build_done_page(self) -> Gtk.Widget:
         self.done_diagram = BallDiagram()
+        self.done_diagram.label_equator = False
         left = vbox(12, self.done_diagram, label("The projector shows the same globe on the ball.", "hint", wrap=True),
                     width_request=270)
         self.done_ball, self.done_silhouette, self.done_axis, self.done_rows = (label("", "secondary") for _ in range(4))
@@ -717,7 +725,7 @@ class CalibrationWindow(Adw.Window):
             return b.row_pitch_deg, b.row_offset_deg
         if self.ball_saved:  # never calibrated, but the ball has been measured (on file, or on step 1)
             pitch = self._seeded_pitch()
-            return pitch, parity_offset(pitch)  # the row count says where the seam falls
+            return pitch, parity_shift(pitch) * pitch  # the row count says where the seam falls
         return DEFAULT_PITCH, 0.0
 
     def _axis_act(self, action: str, arg: Any) -> None:
@@ -752,6 +760,21 @@ class CalibrationWindow(Adw.Window):
             self.rows_step.select(arg)
         self._send_preview()
         self._update()
+
+    def _rows_reset_shift(self) -> None:
+        if self.rows:
+            self.rows.reset_shift()
+            self.rows_cleared = False
+            self._send_preview()
+            self._update()
+
+    def _rows_reset_pitch(self) -> None:
+        """Back to what the ball's size on step 1 works out to, which is where this step started."""
+        if self.rows:
+            self.rows.set_pitch(self._seeded_pitch())
+            self.rows_cleared = False
+            self._send_preview()
+            self._update()
 
     def _rows_set_pattern(self, mode: str) -> None:
         if self.rows and self.rows.mode != mode:
@@ -863,7 +886,7 @@ class CalibrationWindow(Adw.Window):
         if self.rows:
             self.read_rows.set_text(self.rows.text())
             self.read_shift.set_text(self.rows.shift_text())
-            self.rows_from_ball.set_text(f"{self.ball_diameter:.0f} cm · {self.ball_tile:.0f} mm → {self._seeded_pitch():.1f}°")
+            self.pattern_seg.select(self.rows.mode)  # the Z key toggles it too, so the buttons follow the state
             self.rows_diagram.roll, self.rows_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.rows_diagram.rows = (self.rows.pitch, self.rows.offset, self.rows.mode)
             self.rows_diagram.queue_draw()

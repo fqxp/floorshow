@@ -257,7 +257,7 @@ class AxisSession:
 
 # --- step 3: tile rows (pitch / offset) ----------------------------------------------------------
 
-OFFSET_STEP = {"fine": 0.05, "normal": 0.2, "coarse": 1.0}  # degrees of latitude per key press
+SHIFT_STEP = {"fine": 0.02, "normal": 0.1, "coarse": 0.25}  # fractions of a row per key press
 PITCH_STEP = {"fine": 0.005, "normal": 0.02, "coarse": 0.1}
 MIN_PITCH, MAX_PITCH = 1.0, 12.0
 DEFAULT_PITCH = 4.0
@@ -266,10 +266,15 @@ ROWS_KEYS = {"Up": ("offset", +1), "Down": ("offset", -1), "Left": ("pitch", -1)
 ROW_TINTS = {"a": (0.00, 0.85, 0.75), "b": (0.90, 0.00, 0.70), "equator": (1.00, 0.68, 0.20)}
 
 
-def parity_offset(pitch: float) -> float:
-    """Where a row boundary sits on a ball built symmetrically about its equator. An even number of rows puts
-    a seam on the equator, an odd number puts a row's middle there, so the count decides the offset."""
-    return 0.0 if round(180.0 / pitch) % 2 == 0 else pitch / 2
+def parity_shift(pitch: float) -> float:
+    """Where a row boundary sits on a ball built symmetrically about its equator, in rows. An even number of
+    rows puts a seam on the equator, an odd number puts a row's middle there, so the count decides the shift."""
+    return 0.0 if round(180.0 / pitch) % 2 == 0 else -0.5
+
+
+def wrap_rows(shift: float) -> float:
+    """Shifting by a whole row gives back the same grid, so only the fraction means anything."""
+    return ((shift + 0.5) % 1.0) - 0.5
 
 
 def rows_key_to_action(name: str) -> tuple[str, Any] | None:
@@ -297,34 +302,44 @@ class RowsSession:
     once, while a wrong pitch lines up in one part of the ball and drifts out of line towards the poles."""
 
     pitch: float = DEFAULT_PITCH
-    offset: float = 0.0
+    offset: float = 0.0  # degrees, the way the config keeps it; held here as a fraction of a row
     step: str = "normal"
     mode: str = "all"  # "all" | "equator"
 
     def __post_init__(self) -> None:
-        self.initial = (self.pitch, self.offset)
-        self.offset_touched = False  # until then the offset follows from the row count
-        self._wrap()
+        # The shift is what is edited, in rows rather than degrees: a nudge then means the same amount of
+        # ball wherever the pitch happens to be, and it survives a change of pitch unmoved.
+        self.shift = wrap_rows(self.offset / self.pitch)
+        self.offset_touched = False  # until then the shift follows from the row count
+        self.initial = (self.pitch, self.shift)
+        self._sync()
 
-    def _wrap(self) -> None:
-        self.offset = ((self.offset + self.pitch / 2) % self.pitch) - self.pitch / 2  # offsets only matter modulo a row
+    def _sync(self) -> None:
+        self.offset = self.shift * self.pitch
+
+    def set_shift(self, shift: float) -> None:
+        self.shift = wrap_rows(round(shift, 4))
+        self._sync()
 
     def nudge_offset(self, sign: int) -> None:
-        self.offset += sign * OFFSET_STEP[self.step]
+        self.set_shift(self.shift + sign * SHIFT_STEP[self.step])
         self.offset_touched = True
-        self._wrap()
+
+    def reset_shift(self) -> None:
+        """Back to a row boundary on the equator, and stay there: an explicit choice, not a seed."""
+        self.set_shift(0.0)
+        self.offset_touched = True
 
     def seed_pitch(self, value: float) -> None:
-        """Take a pitch worked out from the ball's size, and with it the offset that row count implies.
-        Only until the offset has been nudged: after that it is the user's, and nothing moves it."""
+        """Take a pitch worked out from the ball's size, and with it the shift that row count implies.
+        Only until the shift has been nudged: after that it is the user's, and nothing moves it."""
         self.set_pitch(value)
         if not self.offset_touched:
-            self.offset = parity_offset(self.pitch)
-            self._wrap()
+            self.set_shift(parity_shift(self.pitch))
 
     def set_pitch(self, value: float) -> None:
         self.pitch = min(MAX_PITCH, max(MIN_PITCH, value))
-        self._wrap()
+        self._sync()
 
     def nudge_pitch(self, sign: int) -> None:
         self.set_pitch(self.pitch + sign * PITCH_STEP[self.step])
@@ -345,14 +360,14 @@ class RowsSession:
 
     @property
     def dirty(self) -> bool:
-        return abs(self.pitch - self.initial[0]) > 1e-9 or abs(self.offset - self.initial[1]) > 1e-9
+        return abs(self.pitch - self.initial[0]) > 1e-9 or abs(self.shift - self.initial[1]) > 1e-9
 
     def text(self) -> str:
         return f"≈ {self.rows:.0f} rows · {self.pitch:.2f}° each"
 
     def shift_text(self) -> str:
-        """The offset as what it does: how far the whole grid sits off a row boundary at the equator."""
-        return f"{self.offset / self.pitch:+.2f} rows"
+        """The shift as what it does: how far the whole grid sits off a row boundary at the equator."""
+        return f"{self.shift:+.2f} rows"
 
     def preview(self) -> dict[str, Any]:
         return {"mode": self.mode, "pitch_deg": round(self.pitch, 5), "offset_deg": round(self.offset, 5)}

@@ -222,7 +222,7 @@ def _row_mismatches(gl, cal, mode, pitch, offset):
             if band == equator_band:
                 exp[y][x] = "equator"
             elif mode == "all" and abs(lat) <= 60:
-                exp[y][x] = "a" if band % 2 == 0 else "b"
+                exp[y][x] = "a" if (band - equator_band) % 2 == 0 else "b"
             else:
                 exp[y][x] = None  # past the limit, or not the equator's row in "equator" mode: black
     checked = bad = 0

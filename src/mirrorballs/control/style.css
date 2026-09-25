@@ -24,6 +24,7 @@ headerbar.mb-header button { color: @t2; }
 .panel-title { font-size: 16px; font-weight: 700; }
 .secondary { color: @t2; font-size: 13px; }
 .lead { color: @t2; font-size: 15px; }     /* body text that has to be read, not glanced at */
+.instruction { color: @t1; font-size: 16px; }   /* what the wizard is telling you to do: the point of the step */
 .headline { color: @t1; font-size: 24px; font-weight: 700; }
 .hint { color: @t3; }
 

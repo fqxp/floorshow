@@ -203,12 +203,18 @@ def test_rows_nudging_and_readout_match_the_design_board():
     assert r.text() == "≈ 47 rows · 3.81° each"  # the design's example, counted in whole rows
     r.apply("pitch", +1)
     assert r.pitch == pytest.approx(180 / 47.3 + 0.02) and r.dirty
+    # the shift moves in rows, not degrees, so a nudge means the same amount of ball at any pitch
+    r.apply("offset", +1)
+    assert r.shift == pytest.approx(0.1) and r.offset == pytest.approx(0.1 * r.pitch)
+    assert r.shift_text() == "+0.10 rows"
     r.apply("step", "coarse")
     r.apply("offset", +1)
-    assert r.offset == pytest.approx(1.0)  # 1 degree is inside one row (+-1.9), so no wrap yet
+    assert r.shift == pytest.approx(0.35)
     for _ in range(50):
         r.apply("offset", +1)
-    assert -r.pitch / 2 <= r.offset < r.pitch / 2
+    assert -0.5 <= r.shift < 0.5 and -r.pitch / 2 <= r.offset < r.pitch / 2
+    r.reset_shift()
+    assert r.shift == 0.0 and r.offset == 0.0
 
 
 def test_rows_pitch_is_clamped_and_pattern_toggles():
