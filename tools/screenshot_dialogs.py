@@ -78,6 +78,7 @@ def on_activate(app):
     provider = Gtk.CssProvider()
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+    tokens.pin_base_font()  # shots are of the design, at the size it was drawn
     provider.load_from_string(tokens.css(True))
 
     scenes = TMP / "scenes"

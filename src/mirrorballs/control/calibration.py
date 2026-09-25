@@ -847,6 +847,8 @@ class CalibrationWindow(Adw.Window):
         for i, pill in enumerate(self.step_pills, start=1):
             set_classes(pill.get_first_child(), {"current": i == self.step_no})
         active = s is not None and self.main.connected
+        self.blink_btn.set_active(s is not None and s.blink)  # the toggles show what the session actually has
+        self.grid_btn.set_active(s is not None and s.grid)
         for w in (self.finish_btn, *self.next_btns.values(), self.blink_btn, self.grid_btn, self.step_seg,
                   *(b for step, b in self.reset_btns.items() if step != STEP_BALL)):
             w.set_sensitive(active)

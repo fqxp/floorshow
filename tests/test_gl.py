@@ -158,7 +158,11 @@ def test_transitions_master_and_lines(gl):
         return [v >= 250 for v in img[row, W // 2:].max(axis=1)].count(True)
 
     assert bright(lines, mark_y) == 1 and bright(lines, mark_y + 20) == 0
-    assert bright(comp(overlay=replace(over, mark=0.0)), mark_y) == 0  # blinked off, the 0.6 line stays
+    # the line steps aside for the mark, so the strobe swings the whole way to black and back, and only there
+    dark = comp(overlay=replace(over, mark=0.0))
+    x = int(0.75 * W)
+    assert lines[mark_y, x].max() == 255 and dark[mark_y, x].max() == 0
+    assert lines[mark_y + 20, x].max() == dark[mark_y + 20, x].max() > 100
     # verification grid draws something inside the ball only
     grid = comp(overlay=Overlay(grid=True))
     assert grid[..., 1].max() > 100 and grid[2, 2].tolist() == [0, 0, 0]

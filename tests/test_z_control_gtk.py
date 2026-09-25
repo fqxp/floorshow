@@ -19,6 +19,10 @@ except (ValueError, ImportError):  # pragma: no cover
 if not Gtk.init_check() or Gdk.Display.get_default() is None:  # pragma: no cover
     pytest.skip("no display", allow_module_level=True)
 
+from mirrorballs.control import tokens as _tokens  # noqa: E402
+
+_tokens.pin_base_font()  # the sizes below are the design's, so the design's base font is what they need
+
 from mirrorballs.control import tokens, viewmodel as vm
 from mirrorballs.common.config import load_config
 from mirrorballs.control.client import RendererClient

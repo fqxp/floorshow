@@ -78,7 +78,7 @@ def test_apply_reports_whether_the_calibration_changed():
     s = session()
     assert s.apply("line", ("left", -1)) is True
     assert s.apply("step", "coarse") is False and s.step == "coarse"
-    assert s.apply("blink", None) is False and s.blink
+    assert s.apply("blink", None) is False and not s.blink  # the strobe starts on, so this turns it off
     assert s.apply("grid", None) is False and s.grid
     s.cal = Calibration(0.5, 0.52, 0.5, 0.52)  # already at the minimum size
     assert s.apply("line", ("left", +1)) is False  # a line cannot cross its opposite, so nothing changed

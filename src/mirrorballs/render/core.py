@@ -27,7 +27,8 @@ FILE_POLL_S = 0.5
 FADE_S = 0.4  # blackout fade
 OUTPUT_STALL_S = 1.5  # no frame presented for this long: the window is hidden or covered
 DEFAULT_TILE_DEG = 4.0
-MARK_BLINK_HZ = 5.0  # toggles per second of the tangent marks: fast enough for the eye to catch them going
+MARK_BLINK_HZ = 6.0  # strobe flashes per second of the tangent marks
+MARK_DUTY = 0.4  # and how much of each flash they are lit: a strobe, not a square wave, so it reads as flicker
 CAL_SPIN_DPS = 24.0  # the confirmation step turns the grid at a mirror ball's pace: 15 s per revolution
 TRAIL_FLOOR = 0.02  # a trace counts as gone once it is this fraction of its brightness
 EASE = {
@@ -512,7 +513,7 @@ class Core:
                 cal_view = Calibration(pv["left"], pv["right"], pv["top"], pv["bottom"], pv["roll_deg"], pv["tilt_deg"])
                 # Blink flashes only the tangent marks: the lines themselves stay put, so what flickers is
                 # exactly the pixel whose disappearance behind the ball is the thing being judged.
-                mark = 1.0 if not pv["blink"] or int(now * MARK_BLINK_HZ) % 2 == 0 else 0.0
+                mark = 1.0 if not pv["blink"] else float((now * MARK_BLINK_HZ) % 1.0 < MARK_DUTY)
                 levels = tuple(1.0 if pv["active"] == side else 0.6 for side in ("left", "right", "top", "bottom"))
                 rows = pv.get("rows")
                 overlay = Overlay(

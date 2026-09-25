@@ -25,6 +25,24 @@ LIGHT = {
 
 STYLE_FILE = Path(__file__).with_name("style.css")
 
+BASE_FONT_PX = 14  # the body size the design was drawn at; every em in style.css divides by it
+
+
+def pin_base_font(dpi: int = 96) -> None:
+    """Make the desktop's default font exactly ``BASE_FONT_PX`` for this process.
+
+    The stylesheet is written in em so the UI follows whatever text size the desktop is set to. That is
+    right for the app and wrong for a test or a screenshot, where the design's own proportions are the
+    thing being checked, so those pin the base and get the sizes the design was drawn at. The family is
+    left alone, because it is what decides how wide the text comes out."""
+    from gi.repository import Gtk
+
+    settings = Gtk.Settings.get_default()
+    name = settings.get_property("gtk-font-name") or "Sans 11"
+    family = name.rsplit(" ", 1)[0] if name.rsplit(" ", 1)[-1].replace(".", "").isdigit() else name
+    settings.set_property("gtk-xft-dpi", dpi * 1024)
+    settings.set_property("gtk-font-name", f"{family} {BASE_FONT_PX * 72 / dpi:g}")
+
 
 def palette(dark: bool) -> dict[str, str]:
     return DARK if dark else LIGHT

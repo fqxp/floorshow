@@ -56,7 +56,7 @@ class Session:
     width: int = DEFAULT_SIZE[0]
     height: int = DEFAULT_SIZE[1]
     step: str = "normal"
-    blink: bool = False
+    blink: bool = True  # the strobing marks are how the step is done, so they are on from the start
     grid: bool = False
     active: Side | None = None  # last-moved line, drawn brighter on the projector
 

@@ -42,17 +42,21 @@ void main() {
         vec2 px = gl_FragCoord.xy;
         vec4 at = vec4(u_lines.x * u_resolution.x, u_lines.y * u_resolution.x,
                        (1.0 - u_lines.z) * u_resolution.y, (1.0 - u_lines.w) * u_resolution.y);
-        float l = 0.0;
-        l = max(l, lineCoverage(abs(px.x - at.x)) * u_lineLevels.x);
-        l = max(l, lineCoverage(abs(px.x - at.y)) * u_lineLevels.y);
-        l = max(l, lineCoverage(abs(px.y - at.z)) * u_lineLevels.z);
-        l = max(l, lineCoverage(abs(px.y - at.w)) * u_lineLevels.w);
-        // Where each line grazes the ball it is at its most telling, so a short mark sits there: the ball's
-        // centre height for the upright lines, its centre width for the flat ones.
+        // Where each line grazes the ball it is at its most telling, so it hands its middle ten pixels to a
+        // mark: one hard pixel, no antialiasing, that the renderer strobes. The line stops dead there, so the
+        // dark half of the strobe is actually dark -- a pixel that only dims for a moment is not something you
+        // can see from across a room, which is the whole job here.
         vec2 c = vec2(u_cal.x * u_resolution.x, u_cal.y * u_resolution.y);
+        float midY = step(abs(px.y - c.y), MARK_HALF_PX);   // the window on the upright lines
+        float midX = step(abs(px.x - c.x), MARK_HALF_PX);   // and on the flat ones
+        float l = 0.0;
+        l = max(l, lineCoverage(abs(px.x - at.x)) * u_lineLevels.x * (1.0 - midY));
+        l = max(l, lineCoverage(abs(px.x - at.y)) * u_lineLevels.y * (1.0 - midY));
+        l = max(l, lineCoverage(abs(px.y - at.z)) * u_lineLevels.z * (1.0 - midX));
+        l = max(l, lineCoverage(abs(px.y - at.w)) * u_lineLevels.w * (1.0 - midX));
         float m = 0.0;
-        m = max(m, max(hardLine(px.x, at.x), hardLine(px.x, at.y)) * step(abs(px.y - c.y), MARK_HALF_PX));
-        m = max(m, max(hardLine(px.y, at.z), hardLine(px.y, at.w)) * step(abs(px.x - c.x), MARK_HALF_PX));
+        m = max(m, max(hardLine(px.x, at.x), hardLine(px.x, at.y)) * midY);
+        m = max(m, max(hardLine(px.y, at.z), hardLine(px.y, at.w)) * midX);
         col = max(col, vec3(max(l, m * u_lineMark)));
     }
     if (u_grid != 0) {
