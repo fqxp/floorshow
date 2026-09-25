@@ -273,7 +273,8 @@ def parity_shift(pitch: float) -> float:
 
 
 def wrap_rows(shift: float) -> float:
-    """Shifting by a whole row gives back the same grid, so only the fraction means anything."""
+    """Shifting by a whole row gives back the same grid, so only the fraction means anything. Used on a shift
+    that arrives from the config; nudging stops at the ends instead (see ``RowsSession.set_shift``)."""
     return ((shift + 0.5) % 1.0) - 0.5
 
 
@@ -318,7 +319,9 @@ class RowsSession:
         self.offset = self.shift * self.pitch
 
     def set_shift(self, shift: float) -> None:
-        self.shift = wrap_rows(round(shift, 4))
+        """Half a row up and half a row down are the same grid, so the ends are where nudging stops: running
+        off one and reappearing at the other only looks like the rows jumped when nothing moved."""
+        self.shift = min(0.5, max(-0.5, round(shift, 4)))
         self._sync()
 
     def nudge_offset(self, sign: int) -> None:

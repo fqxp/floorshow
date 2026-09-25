@@ -210,9 +210,13 @@ def test_rows_nudging_and_readout_match_the_design_board():
     r.apply("step", "coarse")
     r.apply("offset", +1)
     assert r.shift == pytest.approx(0.35)
+    # the ends are the ends: half a row either way is the same grid, so nudging stops rather than wrapping
     for _ in range(50):
         r.apply("offset", +1)
-    assert -0.5 <= r.shift < 0.5 and -r.pitch / 2 <= r.offset < r.pitch / 2
+    assert r.shift == 0.5 and r.offset == pytest.approx(r.pitch / 2)
+    for _ in range(50):
+        r.apply("offset", -1)
+    assert r.shift == -0.5
     r.reset_shift()
     assert r.shift == 0.0 and r.offset == 0.0
 
