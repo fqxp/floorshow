@@ -200,7 +200,7 @@ def test_axis_keys():
 
 def test_rows_nudging_and_readout_match_the_design_board():
     r = RowsSession(pitch=180 / 47.3)
-    assert r.text() == "rows ≈ 47.3 · tile 3.8°"  # the design's example
+    assert r.text() == "≈ 47 rows · 3.81° each"  # the design's example, counted in whole rows
     r.apply("pitch", +1)
     assert r.pitch == pytest.approx(180 / 47.3 + 0.02) and r.dirty
     r.apply("step", "coarse")
@@ -220,9 +220,9 @@ def test_rows_pitch_is_clamped_and_pattern_toggles():
     for _ in range(5):
         r.apply("pitch", +1)
     assert r.pitch == 12.0
-    assert r.mode == "zebra"
+    assert r.mode == "all"
     r.apply("pattern", None)
-    assert r.mode == "single" and r.preview()["mode"] == "single"
+    assert r.mode == "equator" and r.preview()["mode"] == "equator"
 
 
 def test_rows_offset_only_matters_modulo_a_row():

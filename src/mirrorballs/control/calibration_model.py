@@ -262,6 +262,14 @@ PITCH_STEP = {"fine": 0.005, "normal": 0.02, "coarse": 0.1}
 MIN_PITCH, MAX_PITCH = 1.0, 12.0
 DEFAULT_PITCH = 4.0
 ROWS_KEYS = {"Up": ("offset", +1), "Down": ("offset", -1), "Left": ("pitch", -1), "Right": ("pitch", +1)}
+# The three colours the renderer paints the rows with (composite.frag holds the same values).
+ROW_TINTS = {"a": (0.00, 0.85, 0.75), "b": (0.90, 0.00, 0.70), "equator": (1.00, 0.68, 0.20)}
+
+
+def parity_offset(pitch: float) -> float:
+    """Where a row boundary sits on a ball built symmetrically about its equator. An even number of rows puts
+    a seam on the equator, an odd number puts a row's middle there, so the count decides the offset."""
+    return 0.0 if round(180.0 / pitch) % 2 == 0 else pitch / 2
 
 
 def rows_key_to_action(name: str) -> tuple[str, Any] | None:
@@ -285,16 +293,17 @@ def done_key_to_action(name: str) -> tuple[str, Any] | None:
 class RowsSession:
     """The tile-row grid: ``pitch`` (degrees of latitude per row) and ``offset`` (latitude of a row boundary).
 
-    Tested by eye with a zebra of alternate rows: where the stripes match real tile rows they light exactly
-    one ring of tiles; a wrong offset shifts that, and a wrong pitch makes it drift across the ball."""
+    Judged by eye against the painted rows: a wrong offset puts every band half on a real row everywhere at
+    once, while a wrong pitch lines up in one part of the ball and drifts out of line towards the poles."""
 
     pitch: float = DEFAULT_PITCH
     offset: float = 0.0
     step: str = "normal"
-    mode: str = "zebra"  # "zebra" | "single"
+    mode: str = "all"  # "all" | "equator"
 
     def __post_init__(self) -> None:
         self.initial = (self.pitch, self.offset)
+        self.offset_touched = False  # until then the offset follows from the row count
         self._wrap()
 
     def _wrap(self) -> None:
@@ -302,7 +311,16 @@ class RowsSession:
 
     def nudge_offset(self, sign: int) -> None:
         self.offset += sign * OFFSET_STEP[self.step]
+        self.offset_touched = True
         self._wrap()
+
+    def seed_pitch(self, value: float) -> None:
+        """Take a pitch worked out from the ball's size, and with it the offset that row count implies.
+        Only until the offset has been nudged: after that it is the user's, and nothing moves it."""
+        self.set_pitch(value)
+        if not self.offset_touched:
+            self.offset = parity_offset(self.pitch)
+            self._wrap()
 
     def set_pitch(self, value: float) -> None:
         self.pitch = min(MAX_PITCH, max(MIN_PITCH, value))
@@ -319,7 +337,7 @@ class RowsSession:
         elif action == "step":
             self.step = arg
         elif action == "pattern":
-            self.mode = "single" if self.mode == "zebra" else "zebra"
+            self.mode = "equator" if self.mode == "all" else "all"
 
     @property
     def rows(self) -> float:
@@ -330,7 +348,11 @@ class RowsSession:
         return abs(self.pitch - self.initial[0]) > 1e-9 or abs(self.offset - self.initial[1]) > 1e-9
 
     def text(self) -> str:
-        return f"rows ≈ {self.rows:.1f} · tile {self.pitch:.1f}°"
+        return f"≈ {self.rows:.0f} rows · {self.pitch:.2f}° each"
+
+    def shift_text(self) -> str:
+        """The offset as what it does: how far the whole grid sits off a row boundary at the equator."""
+        return f"{self.offset / self.pitch:+.2f} rows"
 
     def preview(self) -> dict[str, Any]:
         return {"mode": self.mode, "pitch_deg": round(self.pitch, 5), "offset_deg": round(self.offset, 5)}

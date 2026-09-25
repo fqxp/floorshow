@@ -27,8 +27,9 @@ from ..common.geometry import Calibration, ball_to_image  # noqa: E402
 from . import config_model as cm  # noqa: E402
 from . import tokens  # noqa: E402
 from .calibration_model import (  # noqa: E402
-    DEFAULT_PITCH, DEFAULT_SIZE, STEP_AXIS, STEP_BALL, STEP_DONE, STEP_ROWS, STEP_SILHOUETTE, AxisSession, RowsSession,
-    Session, axis_key_to_action, ball_key_to_action, done_key_to_action, fmt_px, key_to_action, rows_key_to_action,
+    DEFAULT_PITCH, DEFAULT_SIZE, ROW_TINTS, STEP_AXIS, STEP_BALL, STEP_DONE, STEP_ROWS, STEP_SILHOUETTE, AxisSession,
+    RowsSession, Session, axis_key_to_action, ball_key_to_action, done_key_to_action, fmt_px, key_to_action,
+    parity_offset, rows_key_to_action,
 )
 from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, SizeChoice, Stepper, hbox, icon, kbd, label, push_button, set_classes, setting_row, vbox,
@@ -106,6 +107,7 @@ class BallDiagram(Gtk.DrawingArea):
         self.spin = 0.0  # degrees the graticule is turned about the pole axis (step 4)
         self.cross: tuple[float, float] | None = None  # pole marker in units of the ball radius (x right, y up)
         self.rows: tuple[float, float, str] | None = None  # pitch, offset, mode
+        self.rows_limit = 60.0  # matches gl.ROWS_LIMIT_DEG
         self.dark = True
         self.set_draw_func(self._draw)
 
@@ -117,6 +119,19 @@ class BallDiagram(Gtk.DrawingArea):
                 continue
             (cr.line_to if pen_down else cr.move_to)(cx + x * r, cy - y * r)
             pen_down = True
+
+    def _band(self, cr: Any, lat0: float, lat1: float, cx: float, cy: float, r: float) -> bool:
+        """Path around the visible part of one tile row, so it can be filled like the renderer fills it."""
+        lons = range(-180, 181, 3)
+        top = [(x, y) for x, y, v in (self._project(lat0, lon) for lon in lons) if v]
+        bottom = [(x, y) for x, y, v in (self._project(lat1, lon) for lon in lons) if v]
+        if len(top) < 2 or len(bottom) < 2:
+            return False
+        cr.new_path()
+        for i, (x, y) in enumerate(top + bottom[::-1]):
+            (cr.line_to if i else cr.move_to)(cx + x * r, cy - y * r)
+        cr.close_path()
+        return True
 
     def _project(self, lat: float, lon: float) -> tuple[float, float, bool]:
         la, lo = math.radians(lat), math.radians(lon + self.spin)
@@ -144,29 +159,32 @@ class BallDiagram(Gtk.DrawingArea):
             for lon in range(-150, 180, 30):
                 self._curve(cr, [self._project(lat, lon) for lat in range(-90, 91, 4)], cx, cy, r)
                 cr.stroke()
+            # the equator, in the accent colour, with its label
+            cr.set_source_rgb(*rgb(pal["acc"]))
+            cr.set_line_width(1.6)
+            eq = [self._project(0, lon) for lon in range(-180, 181, 4)]
+            self._curve(cr, eq, cx, cy, r)
+            cr.stroke()
+            vis = [(x, y) for x, y, v in eq if v]
+            if vis:
+                x, y = min(vis)
+                cr.select_font_face("sans")
+                cr.set_font_size(11)
+                cr.move_to(cx + x * r + 6, cy - y * r - 4)
+                cr.show_text("equator")
         else:
             pitch, offset, mode = self.rows
-            k0 = math.ceil((-60 - offset) / pitch)
-            k1 = math.floor((60 - offset) / pitch)
+            equator_band = math.floor(-offset / pitch)
+            k0 = math.ceil((-self.rows_limit - offset) / pitch)
+            k1 = math.floor((self.rows_limit - offset) / pitch) - 1
             for k in range(k0, k1 + 1):
-                lit = (k % 2 == 0) if mode == "zebra" else k in (0, 1)  # single row: the two boundaries of row 0
-                cr.set_source_rgba(*rgb(pal["t1"] if lit else pal["t3"]), 0.95 if lit else 0.35)
-                cr.set_line_width(1.6 if lit else 0.8)
-                self._curve(cr, [self._project(offset + k * pitch, lon) for lon in range(-180, 181, 4)], cx, cy, r)
-                cr.stroke()
-        # the equator, in the accent colour, with its label
-        cr.set_source_rgb(*rgb(pal["acc"]))
-        cr.set_line_width(1.6)
-        eq = [self._project(0, lon) for lon in range(-180, 181, 4)]
-        self._curve(cr, eq, cx, cy, r)
-        cr.stroke()
-        vis = [(x, y) for x, y, v in eq if v]
-        if vis:
-            x, y = min(vis)
-            cr.select_font_face("sans")
-            cr.set_font_size(11)
-            cr.move_to(cx + x * r + 6, cy - y * r - 4)
-            cr.show_text("equator")
+                is_eq = k == equator_band
+                if mode == "equator" and not is_eq:
+                    continue
+                tint = ROW_TINTS["equator"] if is_eq else ROW_TINTS["a" if k % 2 == 0 else "b"]
+                if self._band(cr, offset + k * pitch, offset + (k + 1) * pitch, cx, cy, r):
+                    cr.set_source_rgba(*tint, 0.9)
+                    cr.fill()
         if self.cross is not None:
             px, py = self.cross
             x, y = cx + px * r, cy - py * r
@@ -499,9 +517,12 @@ class CalibrationWindow(Adw.Window):
     def _build_rows_page(self) -> Gtk.Widget:
         self.rows_diagram = BallDiagram()
         self.read_rows = label("", "secondary")
+        self.read_shift = label("", "secondary")
         self.rows_from_ball = label("", "secondary")  # what step 1's measurements make the starting pitch
-        left = vbox(12, self.rows_diagram, hbox(8, label("Result", hexpand=True), self.read_rows),
-                    label("Read only. Calculated from offset and pitch.", "hint", wrap=True), width_request=270)
+        left = vbox(12, self.rows_diagram,
+                    vbox(4, hbox(8, label("Rows", hexpand=True), self.read_rows),
+                         hbox(8, label("Shift", hexpand=True), self.read_shift)),
+                    label("Read only. Worked out from the pitch and the shift.", "hint", wrap=True), width_request=270)
 
         def nudge(name: str, sub: str, neg: tuple[str, str, Any], pos: tuple[str, str, Any]) -> Gtk.Widget:
             row = hbox(6, vbox(2, label(name), label(sub, "hint")), Gtk.Box(hexpand=True))
@@ -513,10 +534,11 @@ class CalibrationWindow(Adw.Window):
             return row
 
         self.rows_step = Segmented([("fine", "Fine"), ("normal", "Normal"), ("coarse", "Coarse")], "normal", lambda k: self._rows_act("step", k))
-        self.pattern_seg = Segmented([("zebra", "Zebra"), ("single", "Single row")], "zebra", lambda k: self._rows_set_pattern(k))
+        self.pattern_seg = Segmented([("all", "All rows"), ("equator", "Equator only")], "all",
+                                     lambda k: self._rows_set_pattern(k))
         right = vbox(
             12,
-            nudge("Offset", "up / down", ("↑", "go-up-symbolic", ("offset", +1)), ("↓", "go-down-symbolic", ("offset", -1))),
+            nudge("Shift", "up / down", ("↑", "go-up-symbolic", ("offset", +1)), ("↓", "go-down-symbolic", ("offset", -1))),
             nudge("Pitch", "narrower / wider", ("←", "go-previous-symbolic", ("pitch", -1)), ("→", "go-next-symbolic", ("pitch", +1))),
             hbox(12, label("Step", hexpand=True), self.rows_step),
             vbox(6, vbox(0, label("Pattern"), label("shown on the ball", "hint")), self.pattern_seg),
@@ -528,8 +550,8 @@ class CalibrationWindow(Adw.Window):
 
     def _ball_changed(self, diameter: float | None = None, tile: float | None = None, rpm: float | None = None,
                       direction: str | None = None) -> None:
-        """The ball's measurements only seed the pitch; the zebra then decides it. Without a seed within
-        about 20 % the zebra is ambiguous, because lighting every second row looks just as crisp."""
+        """The ball's measurements only seed the pitch; the painted rows then decide it. Without a seed within
+        about 20 % the pattern is ambiguous, because every second row lining up looks just as convincing."""
         if getattr(self, "_syncing", False):
             return
         if rpm is not None or direction is not None:
@@ -540,7 +562,7 @@ class CalibrationWindow(Adw.Window):
             self.ball_tile = self.ball_tile if tile is None else tile
             self.ball_saved = True
             if self.rows:  # the rows step was already visited: re-seed it from the new measurements
-                self.rows.set_pitch(cm.pitch_from_rows(cm.rows_from_tile(self.ball_diameter, self.ball_tile)))
+                self.rows.seed_pitch(self._seeded_pitch())
                 self.rows_cleared = False
                 self._send_preview()
         self._update()
@@ -558,7 +580,7 @@ class CalibrationWindow(Adw.Window):
         """Whether finish() will write a row grid, and so whether scenes will snap to rows.
 
         An untouched default pitch is not saved, because that alone would switch snapping on. One the ball's own
-        measurements seeded is worth keeping even if the zebra was only looked at."""
+        measurements seeded is worth keeping even if the rows were only looked at."""
         return bool(self.rows and not self.rows_cleared and (self.rows.dirty or self.ball_measured))
 
     def _build_done_page(self) -> Gtk.Widget:
@@ -661,7 +683,8 @@ class CalibrationWindow(Adw.Window):
         STEP_SILHOUETTE: "Move each line inwards until its blinking centre mark disappears behind the ball, then "
                          "one step back out. The lines then sit just outside the ball's edge.",
         STEP_AXIS: "Move the crosshair onto the hanger eyelet at the top of the ball.",
-        STEP_ROWS: "Nudge the rows until the projected stripes line up with the mirror tiles.",
+        STEP_ROWS: "Nudge until the painted rows line up with the real tile rows. Shift moves them all together; "
+                   "pitch stretches them, so get the equator right first and then the rest.",
         STEP_DONE: "",
     }
 
@@ -693,7 +716,8 @@ class CalibrationWindow(Adw.Window):
         if b.row_pitch_deg:
             return b.row_pitch_deg, b.row_offset_deg
         if self.ball_saved:  # never calibrated, but the ball has been measured (on file, or on step 1)
-            return self._seeded_pitch(), 0.0
+            pitch = self._seeded_pitch()
+            return pitch, parity_offset(pitch)  # the row count says where the seam falls
         return DEFAULT_PITCH, 0.0
 
     def _axis_act(self, action: str, arg: Any) -> None:
@@ -838,6 +862,7 @@ class CalibrationWindow(Adw.Window):
             self.axis_diagram.queue_draw()
         if self.rows:
             self.read_rows.set_text(self.rows.text())
+            self.read_shift.set_text(self.rows.shift_text())
             self.rows_from_ball.set_text(f"{self.ball_diameter:.0f} cm · {self.ball_tile:.0f} mm → {self._seeded_pitch():.1f}°")
             self.rows_diagram.roll, self.rows_diagram.tilt = s.cal.roll_deg, s.cal.tilt_deg
             self.rows_diagram.rows = (self.rows.pitch, self.rows.offset, self.rows.mode)
@@ -899,7 +924,7 @@ class CalibrationWindow(Adw.Window):
                 self._syncing = False
             self.ball_saved = False  # as if never measured: the rows step falls back to its own default
             if self.rows:
-                self.rows.set_pitch(DEFAULT_PITCH)
+                self.rows.seed_pitch(DEFAULT_PITCH)
             self._send_preview()
             self._update()
             return
@@ -915,7 +940,7 @@ class CalibrationWindow(Adw.Window):
         else:
             # Back to "never calibrated": the default pitch with snapping off, which finish() stores as null.
             self.rows = RowsSession(DEFAULT_PITCH, 0.0, step=self.rows.step if self.rows else "normal",
-                                    mode=self.rows.mode if self.rows else "zebra")
+                                    mode=self.rows.mode if self.rows else "all")
             self.rows_cleared = True
         self._send_preview()
         self._update()

@@ -7,11 +7,18 @@ uniform float u_lineMark;       // brightness of the tangent marks at the middle
 uniform int u_grid;             // verification grid on/off
 uniform float u_gridSpin;       // degrees the grid is turned about the pole axis (step 4's spinning ball)
 uniform vec2 u_cross;           // pole crosshair centre (x, y as fractions, top-down); x < 0 = off
-uniform vec4 u_rows;            // tile rows: mode (0 off, 1 zebra, 2 single row), pitch deg, offset deg, zebra limit deg
+uniform vec4 u_rows;            // tile rows: mode (0 off, 1 all rows, 2 equator only), pitch deg, offset deg, limit deg
 
 out vec4 fragColor;
 
 const float MARK_HALF_PX = 5.0;  // the tangent marks are ten pixels long
+
+// Tile rows are painted, not outlined: neighbouring rows differ in colour, so every row boundary is an edge
+// you can line up against a real one. The row holding the equator gets its own colour to anchor the offset.
+// calibration.py's ROW_TINTS mirrors these for the on-screen preview.
+const vec3 ROW_A = vec3(0.00, 0.85, 0.75);
+const vec3 ROW_B = vec3(0.90, 0.00, 0.70);
+const vec3 ROW_EQUATOR = vec3(1.00, 0.68, 0.20);
 
 float lineCoverage(float distPx) { return 1.0 - smoothstep(0.5, 1.5, distPx); }
 
@@ -48,15 +55,18 @@ void main() {
         col = max(col, vec3(max(l, m * u_lineMark)));
     }
     if (u_grid != 0) {
+        // The widths come from fwidth, so latitude and longitude are worked out for every pixel of the quad,
+        // inside the ball or not: a derivative taken in only half a quad is undefined and drifts between drivers.
         vec3 dImg;
-        if (pixelToImageDir(gl_FragCoord.xy, dImg)) {
-            vec3 d = u_imgToBall * dImg;
-            float lat = degrees(asin(clamp(d.y, -1.0, 1.0)));
-            float lon = degrees(atan(d.x, d.z)) - u_gridSpin;
-            float g = max(gridLine(lat / 30.0), gridLine(lon / 30.0)) * 0.55;
-            float equator = 1.0 - smoothstep(0.5, 1.5, abs(lat) / max(fwidth(lat), 1e-4));
-            vec2 q = vec2((uv.x - u_cal.x) / u_cal.z, (uv.y - u_cal.y) / u_cal.w);
-            float rim = lineCoverage((1.0 - length(q)) * min(u_cal.z * u_resolution.x, u_cal.w * u_resolution.y));
+        bool onBall = pixelToImageDir(gl_FragCoord.xy, dImg);
+        vec3 d = u_imgToBall * dImg;
+        float lat = degrees(asin(clamp(d.y, -1.0, 1.0)));
+        float lon = degrees(atan(d.x, d.z)) - u_gridSpin;
+        float g = max(gridLine(lat / 30.0), gridLine(lon / 30.0)) * 0.55;
+        float equator = 1.0 - smoothstep(0.5, 1.5, abs(lat) / max(fwidth(lat), 1e-4));
+        vec2 q = vec2((uv.x - u_cal.x) / u_cal.z, (uv.y - u_cal.y) / u_cal.w);
+        float rim = lineCoverage((1.0 - length(q)) * min(u_cal.z * u_resolution.x, u_cal.w * u_resolution.y));
+        if (onBall) {
             col = max(col, vec3(0.0, g, g));
             col = max(col, vec3(equator, equator, 0.0));
             col = max(col, vec3(rim * 0.9));
@@ -67,21 +77,13 @@ void main() {
         if (pixelToImageDir(gl_FragCoord.xy, dImg)) {
             vec3 d = u_imgToBall * dImg;
             float lat = degrees(asin(clamp(d.y, -1.0, 1.0)));
-            float pos = (lat - u_rows.z) / u_rows.y;      // integer = a row boundary
-            // Signed distance to the nearest stripe edge (in row units, positive inside a lit stripe), and a
-            // ramp centred on the edge and one pixel wide, so edges do not shift where latitude changes fast.
-            float lit;
-            if (u_rows.x < 1.5) {                          // zebra: every other row, within the limit
-                float v = pos * 0.5;                        // one stripe = two rows
-                float sd = 0.25 - abs(fract(v - 0.25 + 0.5) - 0.5);
-                float hw = 0.5 * max(fwidth(v), 1e-4);
-                lit = smoothstep(-hw, hw, sd) * step(abs(lat), u_rows.w);
-            } else {                                        // one row: [offset, offset + pitch)
-                float sd = 0.5 - abs(pos - 0.5);
-                float hw = 0.5 * max(fwidth(pos), 1e-4);
-                lit = smoothstep(-hw, hw, sd);
-            }
-            col = max(col, vec3(lit));
+            float band = floor((lat - u_rows.z) / u_rows.y);   // which row this pixel falls in
+            float eq = floor(-u_rows.z / u_rows.y);            // the row the equator falls in
+            bool isEq = abs(band - eq) < 0.5;
+            // Edges stay hard: a blurred boundary is exactly what you cannot line up against a tile seam.
+            float lit = u_rows.x < 1.5 ? step(abs(lat), u_rows.w) : float(isEq);
+            vec3 tint = isEq ? ROW_EQUATOR : (mod(band, 2.0) < 0.5 ? ROW_A : ROW_B);
+            col = max(col, tint * lit);
         }
     }
     if (u_cross.x >= 0.0) {

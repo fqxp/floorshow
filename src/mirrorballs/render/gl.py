@@ -28,7 +28,7 @@ MAX_TEXTURES = 8
 BLEND_ID = {"over": 0, "add": 1, "multiply": 2, "screen": 3}
 TRANSITION_ID = {"cut": 0, "crossfade": 1, "wipe_lat": 2, "iris": 3, "flash": 4}
 FLOATS_PER_SHAPE = 20  # 5 vec4
-ZEBRA_LIMIT_DEG = 60.0  # the zebra covers +-60 degrees of latitude
+ROWS_LIMIT_DEG = 60.0  # the row pattern covers +-60 degrees of latitude; nearer the poles the model frays
 
 
 @dataclass
@@ -40,7 +40,7 @@ class Overlay:
     mark: float = 1.0  # brightness of the one-pixel tangent marks; 0 while a blink has them off
     grid: bool = False
     crosshair: tuple[float, float] | None = None  # window fractions, top-down
-    rows: tuple[str, float, float] | None = None  # (mode "zebra" | "single", pitch deg, offset deg)
+    rows: tuple[str, float, float] | None = None  # (mode "all" | "equator", pitch deg, offset deg)
     spin_deg: float = 0.0  # turns the grid's meridians about the pole axis; latitudes are unaffected by a spin
 
 
@@ -242,8 +242,8 @@ class GlPipeline:
         p["u_grid"].value = 1 if ov.grid else 0
         p["u_gridSpin"].value = ov.spin_deg
         p["u_cross"].value = ov.crosshair if ov.crosshair else (-1.0, 0.0)
-        mode = {"zebra": 1.0, "single": 2.0}[ov.rows[0]] if ov.rows else 0.0
-        p["u_rows"].value = (mode, ov.rows[1], ov.rows[2], ZEBRA_LIMIT_DEG) if ov.rows else (0.0, 4.0, 0.0, ZEBRA_LIMIT_DEG)
+        mode = {"all": 1.0, "equator": 2.0}[ov.rows[0]] if ov.rows else 0.0
+        p["u_rows"].value = (mode, ov.rows[1], ov.rows[2], ROWS_LIMIT_DEG) if ov.rows else (0.0, 4.0, 0.0, ROWS_LIMIT_DEG)
         self.comp_vao.render(moderngl.TRIANGLE_STRIP)
 
     def read_rgb(self, fbo: moderngl.Framebuffer) -> np.ndarray:

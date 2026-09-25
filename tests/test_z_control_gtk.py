@@ -840,8 +840,8 @@ def test_rows_step_previews_stripes_and_saves_only_what_was_changed(cfgwin):
     cal = w.calibration_window
     cal._go(4)
     p = last_preview(fake)
-    assert p["lines"] is False and p["rows"] == {"mode": "zebra", "pitch_deg": 4.0, "offset_deg": 0.0} and p.get("crosshair") is None
-    assert cal.read_rows.get_text() == "rows ≈ 45.0 · tile 4.0°"
+    assert p["lines"] is False and p["rows"] == {"mode": "all", "pitch_deg": 4.0, "offset_deg": 0.0} and p.get("crosshair") is None
+    assert cal.read_rows.get_text() == "≈ 45 rows · 4.00° each" and cal.read_shift.get_text() == "+0.00 rows"
     cal.finish()  # nothing touched: the rows are not saved
     assert load_config(tmp / "config.yaml").ball.row_pitch_deg is None
 
@@ -857,7 +857,7 @@ def test_rows_step_nudges_and_persists(cfgwin):
     cal._rows_set_pattern("single")
     p = last_preview(fake)
     assert p["rows"] == {"mode": "single", "pitch_deg": 4.1, "offset_deg": 1.0} and cal.rows_step.selected() == "coarse"
-    assert cal.read_rows.get_text() == "rows ≈ 43.9 · tile 4.1°"
+    assert cal.read_rows.get_text() == "≈ 44 rows · 4.10° each" and cal.read_shift.get_text() == "+0.24 rows"
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
     assert (b.row_pitch_deg, b.row_offset_deg) == (4.1, 1.0)
@@ -869,7 +869,9 @@ def test_rows_start_from_the_configured_ball_size_and_back_navigation(cfgwin):
     w.open_calibration()
     cal = w.calibration_window
     cal._go(4)
-    assert cal.read_rows.get_text() == "rows ≈ 47.1 · tile 3.8°"  # from the ball's size, as the design's example
+    assert cal.read_rows.get_text() == "≈ 47 rows · 3.82° each"  # from the ball's size, as the design's example
+    # 47 rows is odd, so the ball has a row centred on the equator and the nearest seam is half a row away
+    assert cal.read_shift.get_text() == "-0.50 rows"
     cal._go(3)
     assert cal.step_no == 3 and last_preview(fake)["crosshair"] is not None
     cal._go(2)
@@ -915,7 +917,7 @@ def test_the_ball_step_holds_the_hardware_and_seeds_the_rows(cfgwin):
     assert cal.rows.pitch == pytest.approx(cal._seeded_pitch(), abs=1e-6)
     cal._go(5)
     assert cal.done_ball.get_text() == "50 cm · 20 mm tiles · not turning"
-    assert cal.done_rows.get_text().startswith("rows")  # measured, so the seeded grid is kept
+    assert cal.done_rows.get_text().startswith("≈ 39 rows")  # measured, so the seeded grid is kept
     cal.finish()
     b = load_config(tmp / "config.yaml").ball
     assert (b.diameter_cm, b.tile_mm, b.rotation_rpm) == (50, 20, 0.0)
@@ -1029,7 +1031,7 @@ def test_resetting_the_rows_step_switches_snapping_off_again(cfgwin):
     cal._go(4)
     cal._rows_act("offset", +1)
     cal._go(5)
-    assert cal.done_rows.get_text().startswith("rows")
+    assert cal.done_rows.get_text().startswith("≈")
     cal.finish()
     assert load_config(tmp / "config.yaml").ball.row_offset_deg == pytest.approx(1.2)
     w.open_calibration()
@@ -1058,7 +1060,7 @@ def test_step_keys_reach_the_right_handlers(cfgwin):
     cal._rows_act(*rows_key_to_action("Up"))
     assert cal.rows.offset == pytest.approx(before + 0.2)
     cal._rows_act(*rows_key_to_action("z"))
-    assert cal.rows.mode == "single"
+    assert cal.rows.mode == "equator"
 
 
 def test_calibration_window_fits_the_designed_720_pixel_width_on_every_step(cfgwin):
@@ -1112,7 +1114,7 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         wait(lambda: rig.core._cal_preview and (rig.core._cal_preview.get("rows") or {}).get("pitch_deg") == pytest.approx(4.02),
              "the row pitch reached the renderer")
         f = rig.core.frame(time.monotonic())
-        assert f.overlay.rows == ("zebra", pytest.approx(4.02), pytest.approx(0.0)) and f.overlay.crosshair is None
+        assert f.overlay.rows == ("all", pytest.approx(4.02), pytest.approx(0.0)) and f.overlay.crosshair is None
         tilt = cal.session.cal.tilt_deg
         cal.finish()
         wait(lambda: not rig.core.state(time.monotonic())["calibrating"], "left calibration mode")

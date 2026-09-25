@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 5
+REV = 6
 
 
 class _Cmd(BaseModel):
@@ -73,7 +73,7 @@ class CalibrationBegin(_Cmd):
 
 class RowsPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["zebra", "single"] = "zebra"
+    mode: Literal["all", "equator"] = "all"  # every row in alternating colours, or the equator's row alone
     pitch_deg: float = Field(ge=1.0, le=12.0)
     offset_deg: float = Field(ge=-12.0, le=12.0)
 

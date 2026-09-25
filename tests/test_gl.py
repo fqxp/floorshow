@@ -194,48 +194,61 @@ def _lat(cal, x, y, w=W, h=H):
     return None if d is None else lat_lon(d)[0]
 
 
+TINTS = {"a": (0, 217, 191), "b": (230, 0, 179), "equator": (255, 173, 51), None: (0, 0, 0)}
+
+
+def _tint_of(pixel):
+    """Which of the row colours a pixel is, by nearest match. The rows are painted flat, so this is exact."""
+    return min(TINTS, key=lambda k: sum((a - b) ** 2 for a, b in zip(TINTS[k], pixel)))
+
+
 def _row_mismatches(gl, cal, mode, pitch, offset):
-    """(pixels compared, wrongly lit or dark) for the row overlay against the CPU geometry. Pixels near a stripe
-    edge are skipped: edges are anti-aliased over one pixel, and stripes thinner than that (near the limb) cannot
-    be shown as fully lit."""
+    """(pixels compared, wrongly coloured) for the row overlay against the CPU geometry. Pixels near a row
+    boundary are skipped: rows thinner than a pixel near the limb cannot be shown in their own colour."""
     pipe, dest = gl
     pipe.render_scene(0, [], cal)
     pipe.render_scene(1, [], cal)
     present(pipe, dest, cal, overlay=Overlay(rows=(mode, pitch, offset)))
     img = pipe.read_rgb(dest).astype(int)
-    exp = [[None] * W for _ in range(H)]  # None: outside the ball, or outside the zebra's +-60 degrees
+    equator_band = math.floor(-offset / pitch)
+    exp = [[None] * W for _ in range(H)]  # None: outside the ball, where nothing is drawn at all
     for y in range(H):
         for x in range(W):
             lat = _lat(cal, x, y)
             if lat is None:
                 assert img[y, x].tolist() == [0, 0, 0]
-            elif mode == "single":
-                exp[y][x] = 0.0 <= (lat - offset) / pitch < 1.0
-            elif abs(lat) <= 60:
-                exp[y][x] = math.floor((lat - offset) / pitch) % 2 == 0
+                continue
+            band = math.floor((lat - offset) / pitch)
+            if band == equator_band:
+                exp[y][x] = "equator"
+            elif mode == "all" and abs(lat) <= 60:
+                exp[y][x] = "a" if band % 2 == 0 else "b"
+            else:
+                exp[y][x] = None  # past the limit, or not the equator's row in "equator" mode: black
     checked = bad = 0
     for y in range(H):
         for x in range(W):
             e = exp[y][x]
-            if e is None or any(exp[yy][xx] != e for yy in range(max(0, y - 2), min(H, y + 3))
-                                for xx in range(max(0, x - 2), min(W, x + 3))):
+            if _lat(cal, x, y) is None or any(exp[yy][xx] != e for yy in range(max(0, y - 2), min(H, y + 3))
+                                              for xx in range(max(0, x - 2), min(W, x + 3))):
                 continue
             checked += 1
-            bad += (img[y, x, 0] > 127) != e
+            bad += _tint_of(img[y, x]) != e
     return checked, bad
 
 
 @pytest.mark.parametrize("tilt,roll", [(0, 0), (22, 12), (-15, 0)])
-def test_zebra_rows_follow_the_ball_frame_latitude(gl, tilt, roll):
-    checked, bad = _row_mismatches(gl, Calibration(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt), "zebra", 10.0, 2.0)
+def test_every_row_is_painted_and_follows_the_ball_frame_latitude(gl, tilt, roll):
+    checked, bad = _row_mismatches(gl, Calibration(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt), "all", 10.0, 2.0)
     assert checked > 5000 and bad == 0, (checked, bad)
 
 
 @pytest.mark.parametrize("tilt,roll", [(0, 0), (25, -10)])
-def test_single_row_lights_exactly_one_row(gl, tilt, roll):
-    checked, bad = _row_mismatches(gl, Calibration.default(W / H).__class__(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt),
-                                   "single", 8.0, 1.0)
+def test_equator_mode_paints_the_row_the_equator_falls_in(gl, tilt, roll):
+    cal = Calibration(0.2, 0.8, 0.05, 0.95, roll_deg=roll, tilt_deg=tilt)
+    checked, bad = _row_mismatches(gl, cal, "equator", 8.0, 1.0)
     assert checked > 5000 and bad == 0, (checked, bad)
+    # the offset is the latitude of a boundary, so the lit row is the one below it, never a row away
 
 
 def test_crosshair_is_drawn_at_the_requested_place(gl):
