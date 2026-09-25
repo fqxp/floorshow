@@ -949,7 +949,7 @@ def test_the_ball_step_records_the_rotation_direction_and_speed(cfgwin):
     assert cal.rotation_seg.selected() == "still"
     assert not cal.speed_step.get_sensitive() and cal.speed_hint.get_text() == ""
     cal._ball_changed(direction="left")
-    assert cal.speed_step.get_sensitive() and cal.speed_hint.get_text() == "≈ 40 s per turn"
+    assert cal.speed_step.get_sensitive() and cal.speed_hint.get_text() == "≈ 10 s per turn"
     cal.speed_step.set_value(3.0, notify=True)
     assert cal.ball_rotation_rpm == -3.0 and cal.speed_hint.get_text() == "≈ 20 s per turn"
     cal._go(5)

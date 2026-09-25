@@ -23,7 +23,8 @@ headerbar.mb-header button { color: @t2; }
 .panel { background: @bg2; border: 1px solid @line; border-radius: 12px; padding: 14px; }
 .panel-title { font-size: 16px; font-weight: 700; }
 .secondary { color: @t2; font-size: 13px; }
-.lead { color: @t2; font-size: 14.5px; }   /* body text that has to be read, not glanced at */
+.lead { color: @t2; font-size: 15px; }     /* body text that has to be read, not glanced at */
+.headline { color: @t1; font-size: 24px; font-weight: 700; }
 .hint { color: @t3; }
 
 /* buttons */
@@ -31,6 +32,7 @@ button.mb-btn { background: @bg3; background-image: none; color: @t1; border: 1p
 button.mb-btn:hover { background: @bg4; }
 button.mb-btn:active { background: @bg4; }
 button.mb-btn:disabled { opacity: 0.45; }
+button.mb-btn:checked { background: @acc_bg; border-color: @acc; color: @t1; }
 button.mb-btn.tall { min-height: 36px; font-size: 14px; }
 button.mb-btn.primary { background: @acc; color: @on_acc; border-color: @acc; font-weight: 700; min-height: 44px; }
 button.mb-btn.primary:hover { background: shade(@acc, 1.08); }

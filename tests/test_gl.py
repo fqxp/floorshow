@@ -5,6 +5,7 @@ from pathlib import Path
 
 import moderngl
 import numpy as np
+from dataclasses import replace
 import pytest
 
 from mirrorballs.common.geometry import Calibration, lat_lon
@@ -143,12 +144,21 @@ def test_transitions_master_and_lines(gl):
 
     # calibration lines over a black scene
     pipe.render_scene(1, [], CAL)
-    lines = comp(overlay=Overlay(lines=(0.25, 0.75, 0.2, 0.8), levels=(1.0, 0.6, 1.0, 0.6)))
-    assert lines[H // 2, int(0.25 * W)].max() >= 250            # left line, full level
-    assert 140 <= lines[H // 2, int(0.75 * W)].max() <= 165     # right line, 0.6 level
-    assert lines[int(0.2 * H), W // 2].max() >= 250             # top line
-    assert lines[H // 2, W // 2].max() == 0                     # nothing between the lines
-    assert lines[H // 2, int(0.5 * W)].tolist() == [0, 0, 0]
+    over = Overlay(lines=(0.25, 0.75, 0.2, 0.8), levels=(1.0, 0.6, 1.0, 0.6))
+    lines = comp(overlay=over)
+    y, x = H // 2 + 20, W // 2 + 20                             # clear of the tangent marks in the middle
+    assert lines[y, int(0.25 * W)].max() >= 250                 # left line, full level
+    assert 140 <= lines[y, int(0.75 * W)].max() <= 165          # right line, 0.6 level
+    assert lines[int(0.2 * H), x].max() >= 250                  # top line
+    assert lines[y, W // 2].max() == 0                          # nothing between the lines
+    # the tangent mark: one hard pixel at full brightness, only where the line grazes the ball
+    mark_y = int((1 - CAL.center[1]) * H)
+
+    def bright(img, row):  # bright pixels of the right half, so the left line is out of the way
+        return [v >= 250 for v in img[row, W // 2:].max(axis=1)].count(True)
+
+    assert bright(lines, mark_y) == 1 and bright(lines, mark_y + 20) == 0
+    assert bright(comp(overlay=replace(over, mark=0.0)), mark_y) == 0  # blinked off, the 0.6 line stays
     # verification grid draws something inside the ball only
     grid = comp(overlay=Overlay(grid=True))
     assert grid[..., 1].max() > 100 and grid[2, 2].tolist() == [0, 0, 0]

@@ -36,7 +36,7 @@ from .widgets import (  # noqa: E402
 
 BEGIN_TIMEOUT_S = 1.5  # wait this long for the renderer to report its window size before assuming 1920x1080
 SPIN_DPS, SPIN_TICK_MS = 24.0, 50  # the confirmation globe turns at the renderer's rate (core.CAL_SPIN_DPS)
-DEFAULT_DIAMETER_CM, DEFAULT_TILE_MM, DEFAULT_RPM = 30.0, 10.0, 1.5  # what step 1 offers before anything is measured
+DEFAULT_DIAMETER_CM, DEFAULT_TILE_MM, DEFAULT_RPM = 30.0, 10.0, 6.0  # what step 1 offers before anything is measured
 DIAMETERS_CM = [20.0, 25.0, 30.0, 40.0, 50.0]  # the sizes actually sold; anything else goes in under "Other…"
 TILES_MM = [5.0, 10.0, 15.0, 20.0, 25.0]
 
@@ -316,7 +316,10 @@ class CalibrationWindow(Adw.Window):
         self.banner_box = vbox(0)
         view.add_top_bar(self.banner_box)
 
-        self.instruction = label(self.INSTRUCTIONS[STEP_BALL], "secondary", xalign=0.5, wrap=True)
+        self.instruction = label(self.INSTRUCTIONS[STEP_BALL], "lead", xalign=0.5, wrap=True)
+        self.instruction.set_margin_start(32)
+        self.instruction.set_margin_end(32)
+        self.instruction.set_visible(bool(self.INSTRUCTIONS[STEP_BALL]))
         self.diagram = Diagram()
         self.blink_btn = Gtk.ToggleButton()
         self.grid_btn = Gtk.ToggleButton()
@@ -327,7 +330,7 @@ class CalibrationWindow(Adw.Window):
         self.grid_btn.connect("toggled", lambda b: self._act("grid", None, from_button=b))
         self.read_centre, self.read_size, self.read_aspect = label("", "secondary"), label("", "secondary"), label("", "secondary")
         readouts = vbox(4)
-        for name, w in (("Centre", self.read_centre), ("Size", self.read_size), ("Aspect", self.read_aspect)):
+        for name, w in (("Center", self.read_centre), ("Size", self.read_size), ("Aspect", self.read_aspect)):
             readouts.append(hbox(8, label(name, hexpand=True), w))
         left = vbox(12, self.diagram, hbox(8, self.blink_btn, self.grid_btn), readouts, width_request=270)
 
@@ -440,15 +443,14 @@ class CalibrationWindow(Adw.Window):
                                   lambda v: f"<b>{v:.1f}</b> rpm", lambda v: self._ball_changed(rpm=v), width=132)
         self.speed_hint = label("", "secondary")
 
-        hero = hbox(18, BallArtwork(), label(
-            "Nothing here has to be exact. These are the numbers the steps that follow start from, and you "
-            "settle them there by looking at the real ball in the real room.", "lead", wrap=True, hexpand=True),
-            valign=Gtk.Align.CENTER)
+        hero = hbox(18, BallArtwork(), vbox(6, label("Calibration", "headline"), label(
+            "Enter basic specs of the mirror ball here. Exactness is not necessary, you can refine later.",
+            "lead", wrap=True), hexpand=True, valign=Gtk.Align.CENTER), valign=Gtk.Align.CENTER)
         g = SettingsGroup()
-        g.add(setting_row("Stated diameter", "The size on the box.", self.diameter_step))
-        g.add(setting_row("Tile size", "The little mirrors. Usually 10 mm.", self.tile_step))
+        g.add(setting_row("Diameter", "Diameter from the ball's specs.", self.diameter_step))
+        g.add(setting_row("Tile size", "The little mirrors, often 5 or 10 mm.", self.tile_step))
         g.add(setting_row("Rotation", "Which way it turns, facing the ball. Nothing uses it yet.", self.rotation_seg))
-        g.add(setting_row("Stated speed", "What the motor claims. Close enough is fine.",
+        g.add(setting_row("Rotational speed", "What the motor claims. Close enough is fine.",
                           self.speed_hint, self.speed_step))
         return vbox(16, hero, g, margin_start=24, margin_end=24, margin_top=4, margin_bottom=8, vexpand=True)
 
@@ -479,6 +481,7 @@ class CalibrationWindow(Adw.Window):
         self.axis_step = Segmented([("fine", "Fine"), ("normal", "Normal"), ("coarse", "Coarse")], "normal", lambda k: self._axis_act("step", k))
         self.above_seg = Segmented([("above", "Above the equator"), ("below", "Below the equator")], "above",
                                    lambda k: self._axis_set_above(k == "above"))
+        self.height_label = label("Height above equator", hexpand=True)
         self.height_step = Stepper(0, 0, 300, 1, lambda v: f"<b>{v:.0f}</b> cm", lambda v: self._axis_numbers(height=v), width=150)
         self.distance_step = Stepper(2.4, 0.5, 15, 0.1, lambda v: f"<b>{v:.2f}</b> m", lambda v: self._axis_numbers(distance=v), width=150)
         right = vbox(
@@ -487,7 +490,7 @@ class CalibrationWindow(Adw.Window):
             hbox(12, label("Step", hexpand=True), self.axis_step),
             vbox(6, label("Projector position"), self.above_seg),
             vbox(6, vbox(0, label("Numeric fallback"), label("if the crosshair is hard to judge", "hint", wrap=True)),
-                 hbox(12, label("Height above equator", hexpand=True), self.height_step),
+                 hbox(12, self.height_label, self.height_step),
                  hbox(12, label("Distance to ball", hexpand=True), self.distance_step)),
             hexpand=True,
         )
@@ -571,7 +574,7 @@ class CalibrationWindow(Adw.Window):
             "Finish writes these values to the configuration and reloads the show. Cancel leaves the saved "
             "calibration untouched.", "secondary", wrap=True, hexpand=True), valign=Gtk.Align.CENTER)
         note.add_css_class("note-box")
-        right = vbox(12, label("Calibration is ready to save.", "title-label", xalign=0.0), summary, note, hexpand=True)
+        right = vbox(12, label("Calibration done!", "headline"), summary, note, hexpand=True)
         return hbox(24, left, right, margin_start=24, margin_end=24, margin_top=8, margin_bottom=8, vexpand=True)
 
     def _spin_tick(self) -> bool:
@@ -654,11 +657,12 @@ class CalibrationWindow(Adw.Window):
     # --- steps 2 and 3 -------------------------------------------------------------------
 
     INSTRUCTIONS = {
-        STEP_BALL: "Tell us about the ball.",
-        STEP_SILHOUETTE: "Move each line until it just touches the edge of the ball.",
+        STEP_BALL: "",  # the page opens with its own headline
+        STEP_SILHOUETTE: "Move each line inwards until its blinking centre mark disappears behind the ball, then "
+                         "one step back out. The lines then sit just outside the ball's edge.",
         STEP_AXIS: "Move the crosshair onto the hanger eyelet at the top of the ball.",
         STEP_ROWS: "Nudge the rows until the projected stripes line up with the mirror tiles.",
-        STEP_DONE: "A turning globe is projected onto the ball. Check that it hugs the edges, then finish.",
+        STEP_DONE: "",
     }
 
     def _go(self, step: int) -> None:
@@ -680,6 +684,7 @@ class CalibrationWindow(Adw.Window):
         self.pages.set_visible_child_name(str(step))
         self.footers.set_visible_child_name(str(step))
         self.instruction.set_text(self.INSTRUCTIONS[step])
+        self.instruction.set_visible(bool(self.INSTRUCTIONS[step]))  # steps that carry their own title need no line
         self._send_preview()
         self._update()
 
@@ -747,8 +752,8 @@ class CalibrationWindow(Adw.Window):
         if not self.begun:
             if self._window_size() is not None or _now() >= self._begin_deadline:
                 self._begin()
-        elif self.session and (size := self._window_size()) and size != (self.session.width, self.session.height):
-            self.session.width, self.session.height = size  # the output window was resized: keep the normalised lines
+        elif self.session and (size := self._window_size()) and self.session.resize(*size):
+            self._send_preview()  # the output window was resized: the ball keeps its size in pixels
         self._update()
 
     def on_connection(self, up: bool) -> None:
@@ -814,8 +819,7 @@ class CalibrationWindow(Adw.Window):
         self.read_aspect.set_text(f"{s.aspect:.3f}")
         set_classes(self.read_aspect, {"amber-text": s.aspect_warning})
         for side, lb in self.line_read.items():
-            px, pct = s.line_px(side)
-            lb.set_text(f"{fmt_px(px)} px · {pct:.1f} %")
+            lb.set_text(f"{fmt_px(s.line_px(side)[0])} px")
         self.diagram.queue_draw()
         if self.axis:
             tilt_text, roll_text = self.axis.texts()
@@ -827,6 +831,7 @@ class CalibrationWindow(Adw.Window):
                 self.distance_step.set_value(self.axis.distance_m)
             finally:
                 self._syncing = False
+            self.height_label.set_text(f"Height {'above' if self.axis.above else 'below'} equator")
             self.axis_diagram.roll = self.axis.calibration().roll_deg
             self.axis_diagram.tilt = self.axis.calibration().tilt_deg
             self.axis_diagram.cross = (self.axis.px, self.axis.py)

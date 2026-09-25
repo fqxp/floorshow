@@ -37,6 +37,7 @@ class Overlay:
 
     lines: tuple[float, float, float, float] | None = None  # L, R, T, B (fractions, top-down)
     levels: tuple[float, float, float, float] = (0.6, 0.6, 0.6, 0.6)
+    mark: float = 1.0  # brightness of the one-pixel tangent marks; 0 while a blink has them off
     grid: bool = False
     crosshair: tuple[float, float] | None = None  # window fractions, top-down
     rows: tuple[str, float, float] | None = None  # (mode "zebra" | "single", pitch deg, offset deg)
@@ -237,6 +238,7 @@ class GlPipeline:
         ov = overlay or Overlay()
         p["u_lines"].value = ov.lines if ov.lines else (-1.0, 0.0, 0.0, 0.0)
         p["u_lineLevels"].value = ov.levels
+        p["u_lineMark"].value = ov.mark
         p["u_grid"].value = 1 if ov.grid else 0
         p["u_gridSpin"].value = ov.spin_deg
         p["u_cross"].value = ov.crosshair if ov.crosshair else (-1.0, 0.0)

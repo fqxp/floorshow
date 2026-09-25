@@ -236,7 +236,9 @@ def test_calibration_mode(env):
     f = c.frame(100.0)
     assert f.overlay.lines == (0.3, 0.7, 0.2, 0.8) and f.overlay.levels == (1.0, 0.6, 0.6, 0.6) and f.overlay.grid
     cmd(c, {"cmd": "calibration.preview", "left": 0.3, "right": 0.7, "top": 0.2, "bottom": 0.8, "blink": True}, client="ctl")
-    assert {c.frame(t).overlay.levels[0] for t in (100.0, 100.5)} == {0.0, 0.6}  # blinks at 2 Hz
+    # blink flashes the one-pixel tangent marks; the lines themselves never go away
+    assert {c.frame(t).overlay.mark for t in (100.0, 100.2)} == {0.0, 1.0}  # five toggles a second
+    assert all(c.frame(t).overlay.levels == (0.6,) * 4 for t in (100.0, 100.2))
     # cancel restores the (default) calibration
     cmd(c, {"cmd": "calibration.end", "commit": False}, client="ctl")
     assert c.config.calibration is None and not c.state(100)["calibrating"]

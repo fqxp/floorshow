@@ -27,6 +27,7 @@ FILE_POLL_S = 0.5
 FADE_S = 0.4  # blackout fade
 OUTPUT_STALL_S = 1.5  # no frame presented for this long: the window is hidden or covered
 DEFAULT_TILE_DEG = 4.0
+MARK_BLINK_HZ = 5.0  # toggles per second of the tangent marks: fast enough for the eye to catch them going
 CAL_SPIN_DPS = 24.0  # the confirmation step turns the grid at a mirror ball's pace: 15 s per revolution
 TRAIL_FLOOR = 0.02  # a trace counts as gone once it is this fraction of its brightness
 EASE = {
@@ -509,12 +510,14 @@ class Core:
                 overlay = Overlay(lines=lines, levels=(0.6,) * 4)
             else:
                 cal_view = Calibration(pv["left"], pv["right"], pv["top"], pv["bottom"], pv["roll_deg"], pv["tilt_deg"])
-                visible = 1.0 if not pv["blink"] or int(now * 2) % 2 == 0 else 0.0
-                levels = tuple((1.0 if pv["active"] == side else 0.6) * visible for side in ("left", "right", "top", "bottom"))
+                # Blink flashes only the tangent marks: the lines themselves stay put, so what flickers is
+                # exactly the pixel whose disappearance behind the ball is the thing being judged.
+                mark = 1.0 if not pv["blink"] or int(now * MARK_BLINK_HZ) % 2 == 0 else 0.0
+                levels = tuple(1.0 if pv["active"] == side else 0.6 for side in ("left", "right", "top", "bottom"))
                 rows = pv.get("rows")
                 overlay = Overlay(
                     lines=(cal_view.left, cal_view.right, cal_view.top, cal_view.bottom) if pv.get("lines", True) else None,
-                    levels=levels, grid=pv["grid"],  # type: ignore[arg-type]
+                    levels=levels, mark=mark, grid=pv["grid"],  # type: ignore[arg-type]
                     crosshair=tuple(pv["crosshair"]) if pv.get("crosshair") else None,
                     rows=(rows["mode"], rows["pitch_deg"], rows["offset_deg"]) if rows else None,
                     spin_deg=(now * CAL_SPIN_DPS) % 360.0 if pv.get("spin") else 0.0,

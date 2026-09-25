@@ -31,6 +31,16 @@ def test_steps_are_pixels_not_fractions():
     assert s.active == "right" and s.dirty
 
 
+def test_a_resized_output_window_leaves_the_ball_the_size_it_was():
+    s = session()
+    s.apply("move", (1, 0))  # off centre, so a proportional move is visible
+    size, centre = s.size_px(), s.centre_px()
+    assert s.resize(1280, 720)
+    assert s.size_px() == pytest.approx(size)  # the ball is a real thing: it did not shrink with the window
+    assert s.centre_px() == pytest.approx((centre[0] * 1280 / W, centre[1] * 720 / H))
+    assert not s.resize(1280, 720)  # the same size again changes nothing
+
+
 def test_move_keeps_size_and_grow_keeps_centre():
     s = session()
     size0, centre0 = s.size_px(), s.centre_px()

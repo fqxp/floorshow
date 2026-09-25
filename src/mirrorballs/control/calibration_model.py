@@ -3,7 +3,7 @@ projector pixels. No GTK, so the arithmetic and the key map are tested directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..common.geometry import Calibration, Side
@@ -82,6 +82,18 @@ class Session:
 
     def reset(self, default: Calibration) -> None:
         self.cal, self.active = default, None
+
+    def resize(self, width: int, height: int) -> bool:
+        """The output window changed size. The ball is a real thing in a real room: it keeps the size in
+        pixels it was calibrated to, and only its position follows the window. Returns True if anything moved."""
+        if width <= 0 or height <= 0 or (width, height) == (self.width, self.height):
+            return False
+        cx, cy = self.cal.center
+        rx = self.cal.radii[0] * self.width / width
+        ry = self.cal.radii[1] * self.height / height
+        self.cal = replace(self.cal, left=cx - rx, right=cx + rx, top=cy - ry, bottom=cy + ry)
+        self.width, self.height = width, height
+        return True
 
     def apply(self, action: str, arg: Any) -> bool:
         """Apply a keyboard/button action. Returns True if the calibration itself changed."""

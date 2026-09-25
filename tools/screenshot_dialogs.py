@@ -151,6 +151,8 @@ def on_activate(app):
     cal._rows_act("step", "coarse")
     cal._rows_act("offset", +1)
     shot(cal, "cal3_rows")
+    cal._go(5)
+    shot(cal, "cal4_done")
     print("sent:", [c for c, _ in fake.sent][-6:])
     app.quit()
 
