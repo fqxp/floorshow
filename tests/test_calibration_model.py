@@ -41,6 +41,19 @@ def test_a_resized_output_window_leaves_the_ball_the_size_it_was():
     assert not s.resize(1280, 720)  # the same size again changes nothing
 
 
+def test_a_window_that_is_not_the_one_the_lines_were_measured_on():
+    """The wizard tells you to press F11 once it is open, so it has to survive you doing that."""
+    measured = Calibration(0.303, 0.697, 0.15, 0.85)  # round, measured on a fullscreen 1920x1080 projector
+    s = Session(measured, 1200, 800, fullscreen=False)
+    s.adopt(W, H, Calibration.default(W / H), True)
+    assert s.cal == measured  # fractions of whatever window shows them, so they carry over untouched
+    assert s.size_px()[0] == pytest.approx(s.size_px()[1], abs=1)  # and the ball is round again
+    # an untouched default ball is recomputed instead: whether it comes out round depends on the window
+    d = Session(Calibration.default(1200 / 800), 1200, 800, from_default=True)
+    d.adopt(W, H, Calibration.default(W / H), True)
+    assert d.cal == Calibration.default(W / H) and not d.dirty
+
+
 def test_move_keeps_size_and_grow_keeps_centre():
     s = session()
     size0, centre0 = s.size_px(), s.centre_px()

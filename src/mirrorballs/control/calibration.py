@@ -650,10 +650,15 @@ class CalibrationWindow(Adw.Window):
 
     # --- session -------------------------------------------------------------------------
 
-    def _window_size(self) -> tuple[int, int] | None:
+    def _window_info(self) -> tuple[int, int, bool] | None:
+        """The output window's size and whether it is fullscreen, once the renderer has said."""
         st = self.main.state if self.main.connected else None
         w = st.get("window") if st else None
-        return (w["width"], w["height"]) if w else None
+        return (w["width"], w["height"], bool(w["fullscreen"])) if w else None
+
+    def _window_size(self) -> tuple[int, int] | None:
+        info = self._window_info()
+        return info[:2] if info else None
 
     def _default_calibration(self) -> Calibration:
         w, h = self._window_size() or DEFAULT_SIZE
@@ -661,10 +666,12 @@ class CalibrationWindow(Adw.Window):
 
     def _begin(self) -> None:
         """Enter calibration mode on the renderer, starting from the saved values."""
-        size = self._window_size() or DEFAULT_SIZE
+        info = self._window_info()
+        size = info[:2] if info else DEFAULT_SIZE
         saved = self.main.store.load().calibration
         initial = saved.to_calibration() if saved else Calibration.default(size[0] / size[1])
-        self.session = Session(initial, *size)
+        self.session = Session(initial, *size, fullscreen=bool(info[2]) if info else False,
+                               size_guessed=info is None, from_default=saved is None)
         self.diagram.session = self.session
         self.begun = True
         self.main.send("calibration.begin")
@@ -799,8 +806,14 @@ class CalibrationWindow(Adw.Window):
         if not self.begun:
             if self._window_size() is not None or _now() >= self._begin_deadline:
                 self._begin()
-        elif self.session and (size := self._window_size()) and self.session.resize(*size):
-            self._send_preview()  # the output window was resized: the ball keeps its size in pixels
+        elif self.session and (info := self._window_info()):
+            s, (width, height, full) = self.session, info
+            if s.size_guessed or full != s.fullscreen:
+                # A different window, not a resized one: the lines were never measured against this one.
+                s.adopt(width, height, self._default_calibration(), full)
+                self._send_preview()
+            elif s.resize(width, height):
+                self._send_preview()  # the same window at a new size: the ball keeps its size in pixels
         self._update()
 
     def on_connection(self, up: bool) -> None:

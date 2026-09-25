@@ -705,6 +705,22 @@ def test_calibration_cancel_leaves_the_saved_values_alone(cfgwin):
     assert load_config(tmp / "config.yaml").calibration is None and w.calibration_window is None
 
 
+def test_going_fullscreen_mid_calibration_keeps_the_measured_ball(cfgwin):
+    w, fake, tmp = cfgwin
+    (tmp / "config.yaml").write_text("calibration: {left: 0.303, right: 0.697, top: 0.15, bottom: 0.85}\n")
+    w.apply_state(st(window=dict(width=1200, height=800, fullscreen=False, monitor=None)))
+    w.open_calibration()
+    cal = w.calibration_window
+    assert cal.session.width == 1200 and not cal.session.fullscreen
+    w.apply_state(st(window=dict(width=1920, height=1080, fullscreen=True, monitor="HDMI-A-1")))
+    # a different window, not a resized one: the saved lines are fractions of it and stay as they are
+    assert (cal.session.cal.left, cal.session.cal.bottom) == (0.303, 0.85)
+    assert cal.read_size.get_text().startswith("756")  # round again, at the size it was measured
+    w.apply_state(st(window=dict(width=1920, height=1200, fullscreen=True, monitor="HDMI-A-1")))
+    assert cal.read_size.get_text().startswith("756")  # the same window resized: the ball keeps its pixels
+    cal.cancel()
+
+
 def test_calibration_banners_for_starting_and_windowed_output(cfgwin):
     w, fake, _ = cfgwin
     w.apply_state(st(window=dict(width=1280, height=720, fullscreen=False, monitor=None)))

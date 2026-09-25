@@ -59,6 +59,9 @@ class Session:
     blink: bool = True  # the strobing marks are how the step is done, so they are on from the start
     grid: bool = False
     active: Side | None = None  # last-moved line, drawn brighter on the projector
+    fullscreen: bool = False  # what the output window was doing when these lines were adopted
+    size_guessed: bool = False  # width and height are a placeholder until the renderer says otherwise
+    from_default: bool = False  # the lines are the computed default, not a calibration someone measured
 
     def __post_init__(self) -> None:
         self.cal = self.initial
@@ -83,9 +86,21 @@ class Session:
     def reset(self, default: Calibration) -> None:
         self.cal, self.active = default, None
 
+    def adopt(self, width: int, height: int, default: Calibration, fullscreen: bool) -> None:
+        """Take on a window that is not the one these lines were measured against: it has just gone fullscreen
+        or come back, or the renderer has only now said how big it is.
+
+        Normalised lines mean fractions of whatever window shows them, so a measured calibration carries over
+        as it stands. An untouched default ball is recomputed instead, because whether it comes out round
+        depends on the shape of the window."""
+        self.width, self.height, self.fullscreen = width, height, fullscreen
+        self.size_guessed = False
+        if self.from_default and not self.dirty:
+            self.cal = self.initial = default
+
     def resize(self, width: int, height: int) -> bool:
-        """The output window changed size. The ball is a real thing in a real room: it keeps the size in
-        pixels it was calibrated to, and only its position follows the window. Returns True if anything moved."""
+        """The same output window, at a new size. The ball is a real thing in a real room: it keeps the size
+        in pixels it was calibrated to, and only its position follows the window. True if anything moved."""
         if width <= 0 or height <= 0 or (width, height) == (self.width, self.height):
             return False
         cx, cy = self.cal.center
