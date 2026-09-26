@@ -3,7 +3,7 @@ projector pixels. No GTK, so the arithmetic and the key map are tested directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from ..common.geometry import Calibration, Side
@@ -103,10 +103,7 @@ class Session:
         in pixels it was calibrated to, and only its position follows the window. True if anything moved."""
         if width <= 0 or height <= 0 or (width, height) == (self.width, self.height):
             return False
-        cx, cy = self.cal.center
-        rx = self.cal.radii[0] * self.width / width
-        ry = self.cal.radii[1] * self.height / height
-        self.cal = replace(self.cal, left=cx - rx, right=cx + rx, top=cy - ry, bottom=cy + ry)
+        self.cal = self.cal.for_window(width, height, self.width, self.height)
         self.width, self.height = width, height
         return True
 

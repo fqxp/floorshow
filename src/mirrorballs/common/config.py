@@ -59,14 +59,28 @@ class CalibrationConfig(_Base):
     bottom: float
     roll_deg: float = 0.0
     tilt_deg: float = 0.0
+    # The output window the lines were measured in. They are fractions of it, so without it they can only be
+    # read as fractions of whatever window shows them, and the ball stretches when that window changes shape.
+    # Absent in files written before this was recorded: those keep the old reading.
+    width: int | None = Field(None, gt=0)
+    height: int | None = Field(None, gt=0)
     calibrated_at: str | None = None  # ISO timestamp, shown in the configuration dialog
 
     def to_calibration(self) -> Calibration:
         return Calibration(self.left, self.right, self.top, self.bottom, self.roll_deg, self.tilt_deg)
 
+    def for_window(self, size: tuple[int, int] | None) -> Calibration:
+        """The lines as they should be drawn in an output window of ``size``."""
+        cal = self.to_calibration()
+        if size and self.width and self.height:
+            cal = cal.for_window(size[0], size[1], self.width, self.height)
+        return cal
+
     @staticmethod
-    def from_calibration(c: Calibration) -> CalibrationConfig:
-        return CalibrationConfig(left=c.left, right=c.right, top=c.top, bottom=c.bottom, roll_deg=c.roll_deg, tilt_deg=c.tilt_deg)
+    def from_calibration(c: Calibration, size: tuple[int, int] | None = None) -> CalibrationConfig:
+        wh = {"width": size[0], "height": size[1]} if size else {}
+        return CalibrationConfig(left=c.left, right=c.right, top=c.top, bottom=c.bottom, roll_deg=c.roll_deg,
+                                 tilt_deg=c.tilt_deg, **wh)
 
 
 class Every(_Base):

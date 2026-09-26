@@ -669,7 +669,8 @@ class CalibrationWindow(Adw.Window):
         info = self._window_info()
         size = info[:2] if info else DEFAULT_SIZE
         saved = self.main.store.load().calibration
-        initial = saved.to_calibration() if saved else Calibration.default(size[0] / size[1])
+        # Onto this window, not as they were written: a ball measured in another window is still that ball.
+        initial = saved.for_window(size) if saved else Calibration.default(size[0] / size[1])
         self.session = Session(initial, *size, fullscreen=bool(info[2]) if info else False,
                                size_guessed=info is None, from_default=saved is None)
         self.diagram.session = self.session
@@ -992,7 +993,7 @@ class CalibrationWindow(Adw.Window):
         if not c.is_valid():
             self.main.toast("The lines are too close together.")
             return
-        data = CalibrationConfig.from_calibration(c).model_dump()
+        data = CalibrationConfig.from_calibration(c, (self.session.width, self.session.height)).model_dump()
         data["calibrated_at"] = datetime.now().isoformat(timespec="minutes")
         updates: dict[str, Any] = {"calibration": data}
         ball: dict[str, Any] = {}

@@ -47,6 +47,21 @@ bindings:
     assert c.bindings.keys["1"] == "bars-to-poles"
 
 
+def test_a_calibrated_ball_keeps_its_size_in_any_output_window():
+    """The lines are fractions of a window, so they only mean a ball alongside the window they were measured
+    in. Without that, resizing the output turns the ball into an ellipse."""
+    measured = Calibration(0.303, 0.697, 0.15, 0.85)  # round, 756 px across, on a fullscreen 1920x1080
+    c = CalibrationConfig.from_calibration(measured, (1920, 1080))
+    assert (c.width, c.height) == (1920, 1080)
+    for size in ((1920, 1080), (1280, 720), (1920, 1200), (900, 900)):
+        cal = c.for_window(size)
+        assert (2 * cal.radii[0] * size[0], 2 * cal.radii[1] * size[1]) == pytest.approx((756.48, 756.0))
+        assert cal.center == pytest.approx((0.5, 0.5))  # the centre is a fraction, so it follows the window
+    # a file written before the size was recorded reads as it always did: fractions of whatever shows them
+    old = CalibrationConfig.from_calibration(measured)
+    assert old.width is None and old.for_window((1280, 720)) == measured
+
+
 def test_the_balls_rotation_is_a_signed_rate(tmp_path):
     p = tmp_path / "c.yaml"
     assert load_config(p).ball.rotation_rpm == 0.0  # nothing on file: the ball is assumed to stand still

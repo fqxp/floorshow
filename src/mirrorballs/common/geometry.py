@@ -53,6 +53,18 @@ class Calibration:
         """Semi-axes as fractions of width and height."""
         return ((self.right - self.left) / 2, (self.bottom - self.top) / 2)
 
+    def for_window(self, width: float, height: float, ref_width: float, ref_height: float) -> Calibration:
+        """The same ball in a window of a different size to the one it was measured in.
+
+        The lines are kept as fractions, which only means anything alongside the window they are fractions of:
+        shown in a window of another shape they stretch, and the ball comes out an ellipse. So a ball keeps the
+        size in pixels it was measured at -- it is a real object hanging in a real room, and resizing a window
+        does not reshape it -- and only its centre follows the window."""
+        cx, cy = self.center
+        rx = self.radii[0] * ref_width / width
+        ry = self.radii[1] * ref_height / height
+        return replace(self, left=cx - rx, right=cx + rx, top=cy - ry, bottom=cy + ry)
+
     def is_valid(self) -> bool:
         eps = 1e-9  # the clamps in shift()/grow() land exactly on MIN_SIZE up to float rounding
         return self.right - self.left >= MIN_SIZE - eps and self.bottom - self.top >= MIN_SIZE - eps

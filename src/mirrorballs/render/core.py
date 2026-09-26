@@ -361,14 +361,17 @@ class Core:
             pv = self._cal_preview
             committed = Calibration(pv["left"], pv["right"], pv["top"], pv["bottom"], pv["roll_deg"], pv["tilt_deg"])
             if committed.is_valid():  # the controller persists it; until the file reloads we use it directly
-                self.config = self.config.model_copy(update={"calibration": CalibrationConfig.from_calibration(committed)})
+                size = (self.window["width"], self.window["height"]) if self.window else None
+                self.config = self.config.model_copy(
+                    update={"calibration": CalibrationConfig.from_calibration(committed, size)})
         self.cal_owner, self._cal_preview, self._cal_before = None, None, None
 
-    def calibration(self, aspect: float | None) -> Calibration:
-        """The committed calibration; the default (for ``aspect``, else 16:9) if never calibrated."""
+    def calibration(self, size: tuple[int, int] | None) -> Calibration:
+        """The committed calibration as it should be drawn in an output window of ``size``, so the ball keeps
+        the size it was measured at whatever the window does. The default (for that window) if never done."""
         if self.config.calibration is not None:
-            return self.config.calibration.to_calibration()
-        return Calibration.default(aspect or 16 / 9)
+            return self.config.calibration.for_window(size)
+        return Calibration.default(size[0] / size[1] if size else 16 / 9)
 
     # --- MIDI ----------------------------------------------------------------------------
 
@@ -496,9 +499,9 @@ class Core:
         )
         return SlotSpec(sc.evaluate(env), sc.spin(env), sc.asset_order)
 
-    def frame(self, now: float, aspect: float = 16 / 9) -> FrameSpec:
+    def frame(self, now: float, size: tuple[int, int] | None = None) -> FrameSpec:
         snap = self.clock.snapshot(now)
-        cal = self.calibration(aspect)
+        cal = self.calibration(size)
         # Always, so the gap does not pile up while calibrating or showing the test pattern, where
         # the trail is deliberately off: nothing there should smear as you nudge it.
         decay = self.trail_decay(now)

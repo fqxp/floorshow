@@ -248,6 +248,14 @@ def test_calibration_mode(env):
     cmd(c, {"cmd": "calibration.end", "commit": True}, client="ctl")
     assert c.calibration(None) == Calibration(0.31, 0.69, 0.19, 0.81)
     assert c.frame(100.0).cal == Calibration(0.31, 0.69, 0.19, 0.81) and c.frame(100.0).incoming is not None
+    # committing records the output window, so the ball keeps its size when that window changes shape
+    c.window = {"width": 1920, "height": 1080, "fullscreen": True, "monitor": "X"}
+    cmd(c, {"cmd": "calibration.begin"}, client="ctl")
+    cmd(c, {"cmd": "calibration.preview", "left": 0.31, "right": 0.69, "top": 0.19, "bottom": 0.81}, client="ctl")
+    cmd(c, {"cmd": "calibration.end", "commit": True}, client="ctl")
+    assert (c.config.calibration.width, c.config.calibration.height) == (1920, 1080)
+    wide = c.frame(100.0, (1920, 1200)).cal
+    assert (2 * wide.radii[0] * 1920, 2 * wide.radii[1] * 1200) == pytest.approx((729.6, 669.6))
 
 
 def test_disconnect_ends_calibration_and_ignores_scene_triggers_meanwhile(env):

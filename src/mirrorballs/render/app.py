@@ -213,12 +213,12 @@ def main(argv: list[str] | None = None) -> int:
                 pipe.set_size(fw, fh)
                 try:
                     with lock:
-                        spec = core.frame(now, fw / fh)
+                        spec = core.frame(now, (fw, fh))
                 except Exception as e:  # noqa: BLE001 - a scene bug must never stop the show
                     if str(e) != failed_msg:
                         log.exception("frame evaluation failed")
                         failed_msg = str(e)
-                    spec = FrameSpec(cal=core.calibration(fw / fh), incoming=None, black=True)
+                    spec = FrameSpec(cal=core.calibration((fw, fh)), incoming=None, black=True)
                 draw(pipe, spec, ctx.screen)
                 swap_start = time.monotonic()
                 glfw.swap_buffers(window)

@@ -6,8 +6,11 @@
 > Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
 > wizard: the ball itself (diameter, tile size and whether a motor turns it, all rough — they only seed the
 > steps that follow), the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the
-> tile rows (pitch and offset, checked with a zebra of stripes) and a confirmation step that projects a
-> turning globe.
+> tile rows (pitch and offset, checked against painted rows) and a confirmation step that projects a
+> turning globe. The saved calibration records the output window it was measured in, so the ball keeps the
+> size it was measured at whatever that window later does; a `calibration:` block written before this
+> (no `width`/`height`) is still read the old way, as plain fractions of the window, so re-run the wizard
+> once to pick it up.
 > `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
 
 **Writing scenes:** [docs/scenes-tutorial.md](docs/scenes-tutorial.md) is a worked introduction,
