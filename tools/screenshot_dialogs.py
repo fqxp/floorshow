@@ -45,7 +45,11 @@ def pump(ms=400):
 
 def shot(win, name):
     """Snapshot ``win`` to a PNG. A window that has not produced a frame yet gives an empty render node,
-    so wait and retry."""
+    so wait and retry.
+
+    Under the broadway backend (headless) rendering lags the widget tree by a second or more, so a toggle
+    that was switched from code rather than clicked can be caught still drawn the way it was. Take the shots
+    that have to be right on a real display."""
     for _ in range(10):
         pump(400)
         w, h = win.get_width(), win.get_height()

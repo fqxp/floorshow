@@ -26,8 +26,14 @@ uv run mirrorballs-ctl scenes      # from another shell
 uv run mirrorballs-ctl scene ripples --transition crossfade --beats 2
 uv run mirrorballs-ctl mode random --bars 8
 uv run --extra render --extra control pytest
+gtk4-broadwayd :7 &                # ... or headless: GTK4's HTML5 backend, no X and no Wayland needed
+env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 uv run --extra render --extra control pytest
 uv run --extra control python tools/screenshot_ui.py OUTDIR   # render the main window in each design state
 ```
+
+The GL tests use a standalone EGL context and need no display at all. The controller's GTK tests do, and
+skip without one; `gtk4-broadwayd` (in `libgtk-4-bin`) gives them one that opens no window, which is also how
+the screenshot tools can run without taking over the screen.
 
 The output is a normal window: move it to the projector with Super+Shift+←/→ and press **F11** in it (fullscreen on
 the second monitor, best effort). If you prefer GNOME's own fullscreen, bind a shortcut:
