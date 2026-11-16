@@ -11,6 +11,11 @@ the phase jump. A large error (Start, Song Position Pointer, a dropout) hard-res
 Some programs (Mixxx's "MIDI for light" script) send no MIDI clock but one note per beat. "Beat notes" mode feeds
 those into the same kind of loop: every note is the next whole beat. The bar position is not part of such a
 stream, so the downbeat is set by hand (``sync_downbeat``); an announced tempo is only used for display.
+
+The "audio" source follows a beat tracker (``beat_tracker.BeatTracker``) listening to a line input. The tracker has its
+own beat model; about ten times a second it is handed over (``on_audio_estimate``) and the clock takes the tracker's
+phase and tempo but keeps its own beat numbers, so the bar position stays where the Downbeat button put it. While the
+tracker is not sure (a break, a beatless track) the clock holds its tempo and free-runs, as with a lost MIDI clock.
 """
 
 from __future__ import annotations
@@ -27,10 +32,12 @@ HARD_RESYNC_BEATS = 0.25
 BEAT_SLEW_GAIN = 0.3  # beat notes are 24 times rarer than clock ticks, so each one corrects more
 BEAT_WINDOW = 9  # beat notes the tempo is measured over (8 intervals)
 LOSS_TIMEOUT_S = 0.5  # no tick for this long (or 4 tick periods, if slower) means the clock is lost
+AUDIO_SLEW_GAIN = 0.5  # the tracker's model is already smoothed; most of its phase is taken per estimate
+AUDIO_TIMEOUT_S = 1.0  # no confident estimate for this long: the beat is lost (held, not dropped)
 TAP_RESET_S = 2.0
 MAX_TAPS = 8
 
-Source = Literal["internal", "midi"]
+Source = Literal["internal", "midi", "audio"]
 
 
 @dataclass(frozen=True)
@@ -43,7 +50,8 @@ class ClockSnapshot:
     source: Source
     locked: bool  # internal: always True; midi: ticks are arriving
     running: bool  # False after a MIDI Stop (the beat keeps free-running; visuals never freeze)
-    status: str  # "internal" | "locked" | "waiting for clock" | "stopped"
+    status: str  # "internal" | "locked" | "waiting for clock" | "stopped" | "waiting for beat"
+    confidence: float = 1.0  # audio: the tracker's confidence (0..1); 1 for the other sources
 
 
 class Clock:
@@ -65,6 +73,10 @@ class Clock:
         self._beat_times: deque[float] = deque(maxlen=BEAT_WINDOW)
         self._next_beat: int | None = None  # number of the beat the next note is expected to be
         self._reported_bpm: float | None = None  # tempo announced by the sender (display only)
+        # audio
+        self._audio_last: float | None = None  # when the last confident estimate arrived
+        self._audio_confidence = 0.0
+        self._audio_hard_next = True
         # tap tempo
         self._taps: deque[float] = deque(maxlen=MAX_TAPS)
 
@@ -94,6 +106,16 @@ class Clock:
         self._last_tick_time = None
         self._next_tick = 0
         self._hard_next = True
+        self._running = True
+
+    def use_audio(self, now: float) -> None:
+        """Switch to the audio beat tracker. Free-runs at the current tempo until it is sure of a beat."""
+        self._reanchor(now)
+        self.source = "audio"
+        self.midi_beats = False
+        self._audio_last = None
+        self._audio_confidence = 0.0
+        self._audio_hard_next = True
         self._running = True
 
     # --- internal-clock controls ---------------------------------------------------------
@@ -196,12 +218,40 @@ class Clock:
         self._next_tick = max(0, sixteenths) * 6
         self._hard_next = True
 
+    # --- audio input ---------------------------------------------------------------------
+
+    def on_audio_estimate(self, t: float, anchor_time: float, anchor_beat: float, bpm: float, confidence: float,
+                          locked: bool) -> None:
+        """The tracker's model, ``beat = anchor_beat + (time - anchor_time) * bpm / 60``, as of time ``t``.
+
+        Only the fraction of the tracker's beat is used: the clock keeps counting its own beats, so a bar that was
+        set with the Downbeat button stays set. A small difference is slewed, a big one (the tracker re-locked, a
+        new track) is taken at once. An estimate the tracker is not sure of changes nothing."""
+        if self.source != "audio":
+            return
+        self._audio_confidence = confidence
+        if not locked:
+            return
+        self._audio_last = t
+        theirs = anchor_beat + (t - anchor_time) * bpm / 60.0
+        ours = self._beat_at(t)  # at the old tempo: the new one only applies from t on
+        err = (theirs - ours) - round(theirs - ours)  # -0.5..0.5 beats
+        if self._audio_hard_next or abs(err) > HARD_RESYNC_BEATS:
+            self._anchor_beat, self._anchor_time = ours + err, t
+            self._audio_hard_next = False
+        else:
+            self._anchor_beat, self._anchor_time = ours + AUDIO_SLEW_GAIN * err, t
+        self._bpm = _clamp_bpm(bpm)
+
     # --- output --------------------------------------------------------------------------
 
     def snapshot(self, now: float) -> ClockSnapshot:
         beat = self._beat_at(now - self.offset_s)  # positive offset = the beat is shown later
         if self.source == "internal":
             locked, status = True, "internal"
+        elif self.source == "audio":
+            locked = self._audio_last is not None and now - self._audio_last <= max(AUDIO_TIMEOUT_S, 2 * 60.0 / self._bpm)
+            status = "locked" if locked else "waiting for beat"
         else:
             locked = self._is_locked(now)
             status = "waiting for clock" if not locked else "locked" if self._running else "stopped"
@@ -215,6 +265,7 @@ class Clock:
             locked=locked,
             running=self._running,
             status=status,
+            confidence=self._audio_confidence if self.source == "audio" else 1.0,
         )
 
     # --- internals -----------------------------------------------------------------------

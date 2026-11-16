@@ -1,5 +1,6 @@
 import random
 
+import numpy as np
 import pytest
 
 from mirrorballs.common.clock import PPQN, Clock
@@ -227,3 +228,97 @@ def test_beat_notes_are_ignored_in_clock_mode_and_on_the_internal_source():
     c.use_midi(1.0)  # clock mode
     c.on_midi_beat(2.0)
     assert c._next_beat is None
+
+
+# --- audio source --------------------------------------------------------------------------
+
+
+def test_audio_free_runs_until_the_tracker_is_sure():
+    c = Clock(bpm=120, now=0.0)
+    c.use_audio(now=1.0)
+    s = c.snapshot(2.0)
+    assert s.source == "audio" and not s.locked and s.status == "waiting for beat"
+    assert s.beat == pytest.approx(4.0)  # the beat kept running at the old tempo
+    c.on_audio_estimate(2.0, anchor_time=2.0, anchor_beat=0.3, bpm=128, confidence=0.1, locked=False)
+    assert c.snapshot(2.0).beat == pytest.approx(4.0) and c.snapshot(2.0).bpm == 120
+    assert c.snapshot(2.0).confidence == pytest.approx(0.1)
+
+
+def test_audio_takes_the_trackers_phase_but_keeps_its_own_beat_numbers():
+    c = Clock(bpm=120, now=0.0)
+    c.use_audio(now=0.0)
+    # the clock is at beat 10.3; the tracker says a beat (its own number 0) is happening right now
+    c.on_audio_estimate(5.15, anchor_time=5.15, anchor_beat=0.0, bpm=126, confidence=0.8, locked=True)
+    s = c.snapshot(5.15)
+    assert s.beat == pytest.approx(10.0) and s.bpm == pytest.approx(126)
+    assert s.locked and s.status == "locked"
+
+
+def test_audio_slews_small_differences():
+    c = Clock(bpm=120, now=0.0)
+    c.use_audio(now=0.0)
+    c.on_audio_estimate(1.0, 1.0, 0.0, 120, 0.9, True)  # first one is taken whole: beat 2.0 at t=1
+    c.on_audio_estimate(2.0, 2.0, 0.1, 120, 0.9, True)  # tracker 0.1 beat ahead now
+    assert c.snapshot(2.0).beat == pytest.approx(4.05)  # half of it
+
+
+def test_audio_jumps_when_the_tracker_relocks():
+    c = Clock(bpm=120, now=0.0)
+    c.use_audio(now=0.0)
+    c.on_audio_estimate(1.0, 1.0, 0.0, 120, 0.9, True)
+    c.on_audio_estimate(2.0, 2.0, 0.4, 120, 0.9, True)  # a new track, 0.4 beat off
+    assert c.snapshot(2.0).beat == pytest.approx(4.4)
+
+
+def test_audio_keeps_the_downbeat():
+    c = Clock(bpm=120, beats_per_bar=4, now=0.0)
+    c.use_audio(now=0.0)
+    c.on_audio_estimate(1.0, 1.0, 0.0, 120, 0.9, True)
+    c.sync_downbeat(now=1.4)  # beat 2.8 -> 4.0: the bar starts here
+    for k in range(10):  # tracker beats every 0.5 s from 1.4 on, its own numbering
+        t = 1.5 + 0.1 * k
+        c.on_audio_estimate(t, 1.4, 7.0, 120, 0.9, True)
+    assert c.snapshot(1.4 + 2.0).bar == pytest.approx(2.0, abs=1e-6)  # four beats later: the next bar
+
+
+def test_audio_lock_times_out_but_the_beat_keeps_running():
+    c = Clock(bpm=120, now=0.0)
+    c.use_audio(now=0.0)
+    c.on_audio_estimate(1.0, 1.0, 0.0, 124, 0.9, True)
+    assert c.snapshot(1.9).locked
+    s = c.snapshot(3.0)
+    assert not s.locked and s.status == "waiting for beat" and s.bpm == pytest.approx(124)
+
+
+def test_audio_estimates_are_ignored_by_the_other_sources():
+    c = Clock(bpm=120, now=0.0)
+    c.on_audio_estimate(1.0, 1.0, 0.3, 140, 0.9, True)
+    assert c.snapshot(1.0).beat == pytest.approx(2.0) and c.snapshot(1.0).bpm == 120
+
+
+def test_audio_clock_follows_the_tracker_on_real_audio():
+    from test_beat_tracker import SR, track
+
+    from mirrorballs.common.beat_tracker import BeatTracker
+
+    y, beats = track([(40, 126, True, 0)])
+    t0 = 50.0
+    c = Clock(bpm=120, now=t0)
+    c.use_audio(now=t0)
+    tr = BeatTracker(SR)
+    block = int(0.02 * SR)
+    last = 0.0
+    errs = []
+    for i in range(0, len(y) - block, block):
+        tr.feed(y[i:i + block], t0 + i / SR)
+        now = t0 + (i + block) / SR
+        if now - last >= 0.1:  # the listen process hands estimates over ten times a second
+            e = tr.estimate()
+            c.on_audio_estimate(now, e.anchor_time, e.anchor_beat, e.bpm, e.confidence, e.locked)
+            last = now
+        k = int(np.searchsorted(beats, now - t0)) - 1
+        if now - t0 > 12 and 0 <= k:  # the tracker has settled by then (its own test checks the first seconds)
+            b = c.snapshot(t0 + beats[k]).beat
+            errs.append((b - round(b)) * 60 / 126 * 1000)
+    assert c.snapshot(now).locked
+    assert np.max(np.abs(errs)) < 15
