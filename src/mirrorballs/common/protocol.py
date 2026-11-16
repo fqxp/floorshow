@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 7
+REV = 8
 
 
 class _Cmd(BaseModel):
@@ -123,13 +123,22 @@ class MidiLearn(_Cmd):
     role: Literal["control", "clock"] = "control"  # "clock": the next note on the clock port (beat-notes mode)
 
 
+class AudioPreview(_Cmd):
+    cmd: Literal["audio.preview"]
+    # While any client has this on, every audio source is metered (the state's "audio.sources" carry levels) and the
+    # chosen audio source is tracked even when another clock drives the show (its tempo shows before switching to it).
+    # A client that disconnects is off.
+    on: bool
+
+
 class Simple(_Cmd):
     cmd: Literal["reload", "quit", "tap", "sync_downbeat", "scene.next", "scene.prev"]
 
 
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
-    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | AccentSet | Simple,
+    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | AccentSet
+    | AudioPreview | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

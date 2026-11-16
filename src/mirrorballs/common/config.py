@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
@@ -27,7 +27,8 @@ class _Base(BaseModel):
 
 
 class ClockConfig(_Base):
-    source: Literal["midi", "internal"] = "internal"
+    # "audio": beat detection on an audio source (mirrorballs-listen); the bar position is set with Downbeat
+    source: Literal["midi", "internal", "audio"] = "internal"
     midi_port: str | None = None  # substring match; ALSA client numbers change between runs
     # How the MIDI source announces the beat. "clock": standard MIDI clock (24 per beat, Start/Stop).
     # "beats": one note per beat, as Mixxx's "MIDI for light" script sends. The defaults below are that script's.
@@ -40,6 +41,19 @@ class ClockConfig(_Base):
     bpm: float = Field(120.0, ge=20, le=300)
     beats_per_bar: int = Field(4, ge=1, le=16)
     offset_ms: float = Field(0.0, ge=-500, le=500)
+    # The audio source: a PipeWire node name (an input, or an output whose monitor is listened to). Like the MIDI
+    # port it is matched as a substring when no node has exactly that name.
+    audio_source: str | None = None
+    audio_offset_ms: float = Field(0.0, ge=-500, le=500)  # added to offset_ms while the audio source drives the clock
+    # The tempo range the beat detection looks in. Drum and bass at 174 is read as 87 unless the range excludes it.
+    audio_min_bpm: float = Field(70.0, ge=20, le=300)
+    audio_max_bpm: float = Field(180.0, ge=20, le=300)
+
+    @model_validator(mode="after")
+    def _range(self) -> ClockConfig:
+        if self.audio_max_bpm < 1.5 * self.audio_min_bpm:
+            raise ValueError("audio_max_bpm must be at least 1.5 times audio_min_bpm")
+        return self
 
 
 class BallConfig(_Base):

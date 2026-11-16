@@ -1,4 +1,4 @@
-"""Drains the inbox (IPC clients, MIDI) into Core. GL-free, so it is testable with a real socket."""
+"""Drains the inbox (IPC clients, MIDI, mirrorballs-listen) into Core. GL-free, so it is testable with a real socket."""
 
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ def pump(core: Core, inbox: SimpleQueue, ipc: Sender, now: float) -> int:
         if kind == "midi":
             _, roles, data, t = item
             core.on_midi(roles, data, t)
+        elif kind == "audio":
+            core.on_audio(item[1], now)
         elif kind == "disconnect":
             core.client_disconnected(item[1], now)
         elif kind == "msg":

@@ -18,6 +18,7 @@ from ..common.clock import Clock
 from ..common.config import TRANSITION_TYPES, CalibrationConfig, Config, ConfigError, load_config
 from ..common.geometry import Calibration
 from ..common.scene import Scene, SceneError, load_library, make_env
+from .audio_state import AudioState
 from .frame import FrameSpec, SlotSpec
 from .gl import Overlay
 
@@ -101,6 +102,7 @@ class Core:
         self._cal_preview: dict[str, Any] | None = None
         self._cal_before: Calibration | None = None
         self.midi_dirty = True
+        self.audio = AudioState()  # the app feeds it the listener's messages and reads ``audio_wants``
 
         self.reload(now, first=True)
 
@@ -163,6 +165,7 @@ class Core:
             self._last_slot = None
         self._apply_clock_config(now)
         self.midi_dirty = True
+        self.audio.dirty = True
 
     def _first_scene(self) -> str | None:
         return sorted(self.scenes)[0] if self.scenes else None
@@ -171,11 +174,15 @@ class Core:
         c = self.config.clock
         prev = self._applied_clock
         self.clock.set_beats_per_bar(c.beats_per_bar)
-        self.clock.set_offset_ms(c.offset_ms)
+        # the audio source has its own delay (capture, the detector) on top of the projector's
+        self.clock.set_offset_ms(c.offset_ms + (c.audio_offset_ms if c.source == "audio" else 0.0))
         if (prev is None or prev.source != c.source or (c.source == "internal" and prev.bpm != c.bpm)
-                or (c.source == "midi" and prev.midi_mode != c.midi_mode)):
+                or (c.source == "midi" and prev.midi_mode != c.midi_mode)
+                or (c.source == "audio" and prev.audio_source != c.audio_source)):
             if c.source == "midi":
                 self.clock.use_midi(now, beats=c.midi_mode == "beats")
+            elif c.source == "audio":
+                self.clock.use_audio(now)
             else:
                 self.clock.use_internal(c.bpm, now)
         self._applied_clock = c
@@ -196,6 +203,20 @@ class Core:
         """(clock port substring or None, control port substring or None) the app should have open."""
         clock = self.config.clock.midi_port if self.config.clock.source == "midi" else None
         return clock, self.config.midi.control_port
+
+    def audio_wants(self) -> tuple[str | None, bool, float, float] | None:
+        """What mirrorballs-listen should do: (tracked source, meter the others, min bpm, max bpm), or None when it
+        is not needed (no audio clock, nobody previewing)."""
+        c = self.config.clock
+        return self.audio.wants(c.source, c.audio_source, c.audio_min_bpm, c.audio_max_bpm)
+
+    def on_audio(self, msg: dict[str, Any], now: float) -> None:
+        """One message from mirrorballs-listen. Estimates of the chosen source drive the audio clock."""
+        est = self.audio.on_message(msg, now)
+        c = self.config.clock
+        if est is not None and self.clock.source == "audio" and est.get("source") == self.audio.resolve(c.audio_source):
+            self.clock.on_audio_estimate(est["t"], est["anchor_time"], est["anchor_beat"], est["bpm"],
+                                         est["confidence"], est["locked"])
 
     # --- scene switching -----------------------------------------------------------------
 
@@ -261,6 +282,7 @@ class Core:
     def client_disconnected(self, client: Any, now: float) -> None:
         if client == self.cal_owner:
             self._end_calibration(commit=False)
+        self.audio.preview(client, False)
 
     def handle(self, cmd: P._Cmd, client: Any, now: float) -> dict[str, Any]:
         """Apply a validated command; returns the reply for the sender."""
@@ -305,6 +327,8 @@ class Core:
             self.test_pattern = cmd.on
         elif isinstance(cmd, P.MidiLearn):
             self.learn, self.learn_role = cmd.on, cmd.role
+        elif isinstance(cmd, P.AudioPreview):
+            self.audio.preview(client, cmd.on)
         elif isinstance(cmd, P.CalibrationBegin):
             self._begin_calibration(client)
         elif isinstance(cmd, P.CalibrationPreview):
@@ -590,7 +614,9 @@ class Core:
                 "locked": snap.locked,
                 "status": snap.status,
                 "midi_mode": cfg.clock.midi_mode,
+                "confidence": round(snap.confidence, 3),  # audio: how sure the beat detection is; else 1
             },
+            "audio": self.audio.state(now, cfg.clock.audio_source, tracked=self.audio_wants() is not None),
             "scene": self.current,
             "scenes": self.scene_ids(),
             "running": self.running,

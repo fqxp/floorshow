@@ -19,6 +19,7 @@ from .dispatch import pump
 from .frame import FrameSpec, draw
 from .inhibit import IdleInhibitor
 from .ipc_server import AlreadyRunning, IpcServer
+from .listen import ListenManager
 from .midi import MidiManager
 from .watchdog import StallWatchdog, file_dumper, install_signal_dump
 
@@ -143,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
 
     core = Core(config_path, [*paths.scene_dirs(), *args.scenes], now=time.monotonic())
     midi = MidiManager(inbox)
+    listen = ListenManager(inbox)  # beat detection on audio, a child process while it is needed
     try:  # stall stacks and the SIGUSR1 dump go to a file next to the log
         dump_stream = open(paths.log_file().with_suffix(".stacks"), "a", buffering=1)
         install_signal_dump(dump_stream)
@@ -155,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     #            only handled while they are pumped, so this thread must never block on anything.
     #  render  : owns the GL context and presents frames. swap_buffers blocks while the compositor does not
     #            want frames (vsync, window hidden), and that is harmless here because events keep flowing.
-    #  control : IPC, MIDI, director, files, state stream. Never waits for the display either.
+    #  control : IPC, MIDI, the audio listener, director, files, state stream. Never waits for the display either.
     lock = threading.Lock()
     stop = threading.Event()
     render_failed = threading.Event()
@@ -175,6 +177,11 @@ def main(argv: list[str] | None = None) -> int:
                         core.midi_dirty = False
                     midi.poll(now)
                     core.midi_status = midi.status()
+                    if core.audio.dirty:
+                        listen.configure(core.audio_wants())
+                        core.audio.dirty = False
+                    listen.poll(now)
+                    core.audio.process = listen.status()
                     if now >= next_state:
                         state = core.state(now)
                         next_state = now + 1.0 / STATE_HZ
@@ -261,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         render.join(2)
         control.join(2)
         midi.close()
+        listen.close()
         ipc.stop()
         inhibitor.stop()
         if render.is_alive():  # still blocked in swap_buffers: tearing GLFW down under it could crash
