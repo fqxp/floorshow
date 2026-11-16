@@ -13,6 +13,7 @@ dependencies = [
 mirrorballs = "mirrorballs.control.app:main"
 mirrorballs-render = "mirrorballs.render.app:main"
 mirrorballs-ctl = "mirrorballs.ctl.__main__:main"
+mirrorballs-listen = "mirrorballs.listen.__main__:main"
 
 [project.optional-dependencies]
 # Output process (no GTK).
@@ -27,6 +28,11 @@ render = [
 control = [
     "pygobject>=3.50",
     "python-rtmidi>=1.5.8",
+]
+# Beat detection on audio (mirrorballs-listen, started by the renderer). Needs the system packages
+# gstreamer1.0-pipewire and gir1.2-gstreamer-1.0, plus PyGObject's build dependencies (see control).
+audio = [
+    "pygobject>=3.50",
 ]
 
 [dependency-groups]

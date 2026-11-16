@@ -81,18 +81,24 @@ class BeatTracker:
         self._win = np.hanning(N_FFT).astype(np.float32)
         freqs = np.fft.rfftfreq(N_FFT, 1.0 / sr)
         self._band_idx = [np.flatnonzero((freqs >= lo) & (freqs < hi)) for lo, hi in BANDS_HZ]
+        # the bands are adjacent runs of bins: their means are one reduceat over the run from the first to the last
+        self._band_lo, self._band_hi = int(self._band_idx[0][0]), int(self._band_idx[-1][-1]) + 1
+        self._band_starts = np.array([int(i[0]) for i in self._band_idx]) - self._band_lo
+        self._band_sizes = np.array([len(i) for i in self._band_idx], dtype=float)
         self._buf = np.zeros(N_FFT, dtype=np.float32)  # newest N_FFT samples
         self._pending = np.zeros(0, dtype=np.float32)
         self._samples = 0  # samples consumed into frames
-        self._t_first: float | None = None  # capture time of sample 0
+        self._fed = 0  # samples handed to feed() so far
+        self._t_first: float | None = None  # capture time of sample 0, as the newest block's timestamp implies
         self._prev_spec: np.ndarray | None = None
         self._low_bins = np.concatenate(self._band_idx[:LOW_BANDS])
         self._prev_low_mag: np.ndarray | None = None
         self._level = np.full(len(BANDS_HZ), 1e-3)
         n = int(TEMPO_WINDOW_S * FPS)
-        self._all = np.zeros(n)  # ring buffers of the onset curves, newest last
-        self._low = np.zeros(n)
-        self._low_raw = np.zeros(n)  # the low bands without level normalisation: how loud the kick really is
+        # ring buffer of the onset curves: all bands, the low bands, and the low bands without level normalisation
+        # (linear, not log: how hard the kick really hits); ``_head`` is where the next frame goes
+        self._curves = np.zeros((3, n))
+        self._head = 0
         self._half_evidence = 0.0
         self._kick_ref = 0.0  # raw low flux at the beat while locked: rises fast, fades over ~20 s (outlasts a break)
         self._frames = 0
@@ -112,8 +118,10 @@ class BeatTracker:
     # --- input ---------------------------------------------------------------------------------
 
     def feed(self, samples: np.ndarray, t0: float) -> None:
-        if self._t_first is None:
-            self._t_first = t0
+        """``t0`` is the capture time of the first sample. Every block's time counts, not just the first one's: the
+        sound card's clock drifts against the monotonic clock (some 20 ppm, over an hour more than 70 ms)."""
+        self._t_first = t0 - self._fed / self.sr
+        self._fed += len(samples)
         self._pending = np.concatenate([self._pending, np.asarray(samples, dtype=np.float32)])
         while len(self._pending) >= self.hop:
             hop, self._pending = self._pending[: self.hop], self._pending[self.hop:]
@@ -133,23 +141,24 @@ class BeatTracker:
         self._prev_low_mag = low_mag
         flux = np.maximum(0.0, spec - self._prev_spec)
         self._prev_spec = spec
-        bands = np.array([flux[i].mean() for i in self._band_idx])
+        bands = np.add.reduceat(flux[self._band_lo:self._band_hi], self._band_starts) / self._band_sizes
         a = 1.0 / (LEVEL_TAU_S * FPS)
         self._level += a * (bands - self._level)
         norm = bands / np.maximum(self._level, MIN_ONSET_LEVEL)
         quiet = self._level < MIN_ONSET_LEVEL
         norm[quiet] = 0.0
-        self._all = np.roll(self._all, -1)
-        self._low = np.roll(self._low, -1)
-        self._low_raw = np.roll(self._low_raw, -1)
-        self._low_raw[-1] = low_raw
-        self._all[-1] = norm.sum()
-        self._low[-1] = norm[:LOW_BANDS].sum()
+        self._curves[:, self._head] = (norm.sum(), norm[:LOW_BANDS].sum(), low_raw)
+        self._head = (self._head + 1) % self._curves.shape[1]
         self._frames += 1
         if self._frames % TEMPO_EVERY == 0 and self._frames >= FIRST_TEMPO_S * FPS:
             self._update_tempo()
         if self._frames % PHASE_EVERY == 0 and self._have_tempo:
             self._observe_phase()
+
+    def _recent(self, n: int) -> np.ndarray:
+        """The newest ``n`` frames of the three onset curves, oldest first (shape 3 x n)."""
+        size = self._curves.shape[1]
+        return self._curves[:, (self._head - n + np.arange(n)) % size]
 
     def _frame_time(self, k_from_end: float) -> float:
         """Time of the onset in frame ``-1 - k_from_end`` (k = 0: the newest frame)."""
@@ -159,8 +168,9 @@ class BeatTracker:
     # --- tempo ---------------------------------------------------------------------------------
 
     def _update_tempo(self) -> None:
-        n = min(self._frames, len(self._all))
-        x = self._all[-n:] - self._all[-n:].mean()
+        n = min(self._frames, self._curves.shape[1])
+        x = self._recent(n)[0]
+        x = x - x.mean()
         w = np.exp((np.arange(n) - n) / (TEMPO_TAU_S * FPS))
         x = x * np.sqrt(w)
         if not np.any(x):
@@ -225,13 +235,14 @@ class BeatTracker:
             return
         k = np.arange(n)  # frames back from the newest
         w = np.exp(-k / (PHASE_TAU_S * FPS))
-        e_all = self._all[::-1][:n] * w
-        e_low = self._low[::-1][:n] * w
+        all_, low, raw = self._recent(n)[:, ::-1]  # newest first, as k counts
+        e_all = all_ * w
+        e_low = low * w
         ph = (k / p) % 1.0  # 0 = a beat at the newest frame, growing into the past
         bins = (ph * FOLD_BINS).astype(int) % FOLD_BINS
         fold = np.bincount(bins, e_all, FOLD_BINS)
         fold_low = np.bincount(bins, e_low, FOLD_BINS)
-        fold_raw = np.bincount(bins, self._low_raw[::-1][:n] * w, FOLD_BINS) / np.maximum(np.bincount(bins, w, FOLD_BINS), 1e-9)
+        fold_raw = np.bincount(bins, raw * w, FOLD_BINS) / np.maximum(np.bincount(bins, w, FOLD_BINS), 1e-9)
         fold = _circ_smooth(fold)
         fold_low = _circ_smooth(fold_low)
         fold_raw = _circ_smooth(fold_raw)

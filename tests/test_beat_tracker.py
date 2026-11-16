@@ -114,3 +114,22 @@ def test_beat_at_extrapolates_continuously():
 def test_sample_rate_must_divide_into_frames():
     with pytest.raises(ValueError):
         BeatTracker(44101)
+
+
+def test_block_timestamps_win_over_counting_samples():
+    """A sound card that runs 0.2 % fast. Counting samples from the first block, the beat would be some 60 ms off
+    after 30 s; with every block's time it stays put."""
+    y, beats = track([(70, 126, True, 0)])
+    tr = BeatTracker(SR)
+    block = int(0.02 * SR)
+    fast = 1.002  # the card delivers 1.002 s of samples per real second
+    errs = []
+    for i in range(0, len(y) - block, block):
+        tr.feed(y[i:i + block], 100.0 + i / SR / fast)  # the real (monotonic) time of each block
+        audio_now = (i + block) / SR
+        k = int(np.searchsorted(beats, audio_now)) - 1
+        if audio_now > 20 and 0 <= k < len(beats) - 1:  # the newest beat, in real time
+            c = tr.beat_at(100.0 + beats[k] / fast)
+            errs.append((c - round(c)) * (beats[k + 1] - beats[k]) * 1000)
+    assert np.median(np.abs(errs)) < 8
+    assert np.max(np.abs(errs)) < 20
