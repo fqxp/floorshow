@@ -22,6 +22,9 @@ dark. One operator runs the show from a laptop while the projector shows only th
   stops the show.
 - **Accent colour.** One colour for the whole show, picked in the Main box from every mix of red, green
   and blue at off, half and full. Scenes that use `accent` follow it.
+- **Scene previews.** Every scene card shows a still of the scene, half a beat in. Hovering plays it in
+  time with the show's beat. The Scenes dialog shows them too. The previews are recorded in a separate,
+  low-priority process when a scene file or the accent changes, so the running show doesn't slow down.
 - **Scene filter.** Tag chips above the scene cards narrow them down; "Only accented" shows only the
   scenes that follow the accent colour.
 - **Calibration wizard.** Records the ball's size and tile layout, its silhouette in the projector image,
@@ -58,8 +61,8 @@ the projector (Super+Shift+←/→) and press **F11** in it. Run **Calibration**
 set up the rig.
 
 Config lives in `~/.config/mirrorballs/config.yaml`, your scenes in `~/.config/mirrorballs/scenes/*.yaml`.
-Both reload while the app runs. To write scenes, see [docs/scenes-tutorial.md](docs/scenes-tutorial.md) and
-[docs/scenes-reference.md](docs/scenes-reference.md).
+Both reload while the app runs. Scene previews are cached in `~/.cache/mirrorballs/previews/`. To write
+scenes, see [docs/scenes-tutorial.md](docs/scenes-tutorial.md) and [docs/scenes-reference.md](docs/scenes-reference.md).
 
 ## Development
 

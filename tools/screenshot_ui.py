@@ -16,6 +16,7 @@ from gi.repository import Adw, Gdk, Graphene, GLib, Gtk  # noqa: E402
 from mirrorballs.control import tokens  # noqa: E402
 from mirrorballs.control.library import Library  # noqa: E402
 from mirrorballs.control.main_window import MainWindow  # noqa: E402
+from mirrorballs.control.previews import PreviewCache  # noqa: E402
 from mirrorballs.control.store import ConfigStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,9 +77,10 @@ def on_activate(app):
         "layers:\n  - {type: band, lat: 0, width: 10}\n")
     cfg = tmp / "config.yaml"
     lib = Library([scenes_dir])
-    win = MainWindow(app, None, lib, ConfigStore(cfg))
+    win = MainWindow(app, None, lib, ConfigStore(cfg), previews=PreviewCache(tmp / "previews"))
     win.set_dark(True)
     win.present()
+    pump(3000)  # the preview helper makes the stills
     ids = lib.ids()
     cur = "aurora"
 

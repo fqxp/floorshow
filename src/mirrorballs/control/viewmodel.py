@@ -78,9 +78,14 @@ def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_p
     return f"MIDI · {clock['bpm']:.1f} BPM · {port}", False  # tempo before the port: the chip truncates from the right
 
 
+def live_beat(clock: dict[str, Any], elapsed_s: float = 0.0) -> float:
+    """The renderer's beat extrapolated ``elapsed_s`` past the state sample."""
+    return clock["beat"] + elapsed_s * clock["bpm"] / 60.0
+
+
 def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, float]:
     """(0-based beat within the bar, phase 0..1) extrapolated ``elapsed_s`` past the state sample."""
-    beat = clock["beat"] + elapsed_s * clock["bpm"] / 60.0
+    beat = live_beat(clock, elapsed_s)
     bpb = max(1, clock["beats_per_bar"])
     return int(beat // 1) % bpb, beat - int(beat // 1)
 

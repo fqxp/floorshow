@@ -18,6 +18,7 @@ from .client import RendererClient  # noqa: E402
 from .launcher import start_renderer  # noqa: E402
 from .library import Library  # noqa: E402
 from .main_window import MainWindow  # noqa: E402
+from .previews import PreviewCache  # noqa: E402
 from .store import ConfigStore  # noqa: E402
 
 APP_ID = "de.fqxp.Mirrorballs"
@@ -40,7 +41,8 @@ class Application(Adw.Application):
         style.connect("notify::dark", lambda *_: self._apply_theme())
         self._apply_theme()
 
-        win = MainWindow(self, None, Library(), ConfigStore(), launch_renderer=start_renderer)
+        win = MainWindow(self, None, Library(), ConfigStore(), launch_renderer=start_renderer,
+                         previews=PreviewCache(paths.previews_dir()))
         self.client = RendererClient(paths.socket_path(), win.apply_state, win.set_connection, win.toast, win.apply_event)
         win.client = self.client
         self.window = win

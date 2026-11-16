@@ -36,6 +36,14 @@ def scene_dirs() -> list[Path]:
     return dirs
 
 
+def cache_dir() -> Path:
+    return Path(os.environ["MIRRORBALLS_CACHE_DIR"]) if "MIRRORBALLS_CACHE_DIR" in os.environ else _xdg("XDG_CACHE_HOME", ".cache") / APP
+
+
+def previews_dir() -> Path:
+    return cache_dir() / "previews"
+
+
 def socket_path() -> Path:
     if "MIRRORBALLS_SOCKET" in os.environ:
         return Path(os.environ["MIRRORBALLS_SOCKET"])

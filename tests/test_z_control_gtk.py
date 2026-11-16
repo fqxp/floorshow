@@ -1198,3 +1198,136 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         win.destroy()
         rig.close()
 
+
+def all_of(widget, cls, out=None):
+    out = [] if out is None else out
+    if isinstance(widget, cls):
+        out.append(widget)
+    c = widget.get_first_child()
+    while c:
+        all_of(c, cls, out)
+        c = c.get_next_sibling()
+    return out
+
+
+@pytest.fixture
+def pwin(app, tmp_path, monkeypatch):
+    """A main window with previews, the helper replaced by one that writes small fake files in-process."""
+    import numpy as np
+    from PIL import Image
+
+    from mirrorballs.control.preview_widgets import PreviewManager, PreviewPicture
+    from mirrorballs.control.previews import PreviewCache
+
+    jobs = []
+
+    def fake_start(self, job):
+        jobs.append(job)
+        for s in job["scenes"]:
+            frames = np.zeros((16, job["height"], job["width"], 3), dtype=np.uint8)
+            frames[:, :, :, 0] = np.arange(16, dtype=np.uint8)[:, None, None] * 10  # a different red per frame
+            Image.fromarray(frames[4]).save(self.cache.still_path(s["sid"], s["key"]))
+            np.savez_compressed(self.cache.clip_path(s["sid"], s["key"]), frames=frames, fpb=8, loop_beats=2)
+            self._changed(s["sid"])
+
+    monkeypatch.setattr(PreviewManager, "_start", fake_start)
+    (tmp_path / "cache").mkdir()
+    w = MainWindow(app, FakeClient(), Library([scene_dir(tmp_path)]), ConfigStore(tmp_path / "config.yaml"),
+                   previews=PreviewCache(tmp_path / "cache"))
+    w.present()
+    pump_until(lambda: jobs and all(p.get_paintable() for p in all_of(w.grid, PreviewPicture)))
+    yield w, jobs, PreviewPicture
+    w.destroy()
+
+
+def test_card_previews_fill_the_card_at_16_9_and_never_get_smaller(pwin):
+    w, jobs, PreviewPicture = pwin
+    from mirrorballs.control.previews import OVERSAMPLE, THUMB_H, THUMB_W
+
+    pics = all_of(w.grid, PreviewPicture)
+    assert sorted(p.sid for p in pics) == ["alpha", "beta"]
+    assert len(jobs) == 1 and {s["sid"] for s in jobs[0]["scenes"]} == {"alpha", "beta"}
+    assert jobs[0]["width"] >= THUMB_W * OVERSAMPLE  # sharp even at the largest a card gets
+    for width in (960, 1300, 1800):
+        w.set_size_request(width, 700)
+        pump(300)
+        for p in all_of(w.grid, PreviewPicture):
+            assert p.get_paintable() is not None and p.has_css_class("has-preview")
+            pw, ph = p.get_width(), p.get_height()
+            assert pw >= THUMB_W and abs(ph - pw * THUMB_H / THUMB_W) <= 1
+            card = p.get_ancestor(Gtk.Button)
+            assert card.get_width() - pw < 30  # it fills the card, up to the card's padding
+
+
+def test_hovering_plays_the_loop_on_the_live_beat_and_leaving_shows_the_still(pwin):
+    w, jobs, PreviewPicture = pwin
+    w.set_connection(True)
+    w.apply_state(st(clock=dict(source="internal", port=None, bpm=120.0, beat=9.5, phase=0.5, bar=2.375,
+                                beats_per_bar=4, locked=True, status="internal")), t=time.monotonic())
+    pic = next(p for p in all_of(w.grid, PreviewPicture) if p.sid == "beta")
+    still = pic.get_paintable()
+    pic._play()
+    w.state_time = time.monotonic()  # beat 9.5 now: 1.5 beats into the 2-beat loop, frame 12
+    pic._on_tick(pic, None)
+    assert pic._shown in (12, 13) and pic.get_paintable() is not still
+    pic._still()
+    assert pic.get_paintable() is still and pic._clip is None
+
+
+def test_an_accent_change_remakes_only_accented_previews(pwin, tmp_path):
+    w, jobs, _ = pwin
+    (tmp_path / "scenes" / "gamma.yaml").write_text("schema: 1\nname: Gamma\nlayers:\n  - {type: fill, color: accent}\n")
+    w.library.refresh()
+    w.previews.sync()
+    assert [s["sid"] for s in jobs[-1]["scenes"]] == ["gamma"]
+    w.set_accent("#ff0000")
+    assert pump_until(lambda: len(jobs) == 3, 4000)
+    assert [s["sid"] for s in jobs[-1]["scenes"]] == ["gamma"]
+
+
+def test_the_scenes_dialog_shows_a_preview_per_valid_scene(pwin):
+    w, jobs, PreviewPicture = pwin
+    w.open_scenes()
+    pump(100)
+    pics = all_of(w.scenes_dialog.scene_group, PreviewPicture)
+    assert sorted(p.sid for p in pics) == ["alpha", "beta"] and all(p.get_paintable() for p in pics)
+    w.scenes_dialog.close()
+
+
+def test_a_wider_window_gets_more_cards_per_row_not_wider_cards(app, tmp_path):
+    d = scene_dir(tmp_path)
+    for i in range(10):
+        (d / f"s{i}.yaml").write_text(f"schema: 1\nname: S{i}\nlayers:\n  - {{type: fill}}\n")
+    w = MainWindow(app, FakeClient(), Library([d]), ConfigStore(tmp_path / "config.yaml"))
+    w.present()
+
+    def rows():
+        cards = [c.get_child() for c in all_of(w.grid, Gtk.FlowBoxChild)]
+        tops = [round(c.compute_bounds(w.grid)[1].get_y()) for c in cards]
+        return tops.count(tops[0]), max(c.get_width() for c in cards), min(c.get_width() for c in cards)
+
+    try:
+        w.set_default_size(960, 700)
+        pump(300)
+        narrow, nw, _ = rows()
+        w.set_size_request(1800, 700)
+        assert pump_until(lambda: rows()[0] > narrow, 3000), (w.get_width(), w.grid.get_width(), rows())
+        wide, ww, wmin = rows()
+        assert narrow >= 3 and wide >= 2 * narrow - 1
+        assert ww < nw * 1.3  # lines are filled, but a card grows by a fraction of its width at most
+    finally:
+        w.destroy()
+
+
+def test_hotkeys_are_renumbered_by_the_filter(win, tmp_path):
+    w, fake = win
+    (tmp_path / "scenes" / "gamma.yaml").write_text("schema: 1\nname: Gamma\ntags: [z]\nlayers:\n  - {type: fill}\n")
+    w.library.refresh()
+    w.set_connection(True)
+    w.apply_state(st())
+    w.refresh()
+    assert "3" in texts(cards(w)[2])  # alpha, beta, gamma
+    w._tag_buttons["z"].set_active(True)
+    assert w.visible_ids() == ["gamma"] and "1" in texts(cards(w)[0])
+    w.run_action("scene-key", "1")
+    assert fake.sent[-1][0] == "scene.set" and fake.sent[-1][1]["scene"] == "gamma"

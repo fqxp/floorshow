@@ -22,6 +22,8 @@ from ..common.scene import ParamDef  # noqa: E402
 from . import tokens, viewmodel as vm  # noqa: E402
 from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
+from .preview_widgets import PreviewManager, PreviewPicture  # noqa: E402
+from .previews import DEFAULT_TILE_DEG, OVERSAMPLE, THUMB_H, THUMB_W, Look, PreviewCache  # noqa: E402
 from .store import ConfigStore  # noqa: E402
 from .widgets import Segmented, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
@@ -32,10 +34,12 @@ EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the stre
 CLOCK_HOLD_S = 1.5  # likewise for the clock switch: the renderer has to reload the file before it reports the new source
 ACCENT_HOLD_S = 0.6  # likewise for the accent colour
 RIGHT_COLUMN_W = 272
+MAX_CARDS_PER_ROW = 32
 CONTROLS_MIN_H = 160
 COUNTDOWN_W = 120
 LIBRARY_CHECK_S = 1.0
 RESTART_DELAY_MS = 600  # let the old renderer release its socket before starting the new one
+ACCENT_PREVIEW_DELAY_MS = 1500  # remake accented previews once the accent has settled
 TRAIL_MAX_S = 2.0  # the slider's top end; the protocol allows more, but a trail this long is already a smear
 
 
@@ -164,6 +168,7 @@ class MainWindow(Adw.ApplicationWindow):
         library: Library,
         store: ConfigStore,
         launch_renderer: Any = None,
+        previews: PreviewCache | None = None,
     ):
         super().__init__(application=app, title="Mirrorballs", default_width=960, default_height=700)
         self.set_size_request(720, 520)
@@ -209,6 +214,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         cfg = store.load()
         self.cfg = cfg
+        self.previews = PreviewManager(library, previews, self._preview_look, self._preview_beat) if previews else None
         self.trans_idx = max(0, next((i for i, (k, _) in enumerate(vm.TRANSITIONS) if k == cfg.director.transition.type), 0))
         self.len_idx = vm.nearest_length(cfg.director.transition.beats, cfg.clock.beats_per_bar)
 
@@ -216,6 +222,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._install_keys()
         self.add_tick_callback(self._on_tick)
         self.connect("close-request", self._on_close_request)
+        if self.previews:
+            self.connect("notify::scale-factor", lambda *_a: self.previews and self.previews.request_sync())
+            self.connect("destroy", lambda *_a: self.previews and self.previews.stop())
         self.refresh()
 
     # --- construction --------------------------------------------------------------------
@@ -382,7 +391,9 @@ class MainWindow(Adw.ApplicationWindow):
         tag_row = hbox(8, self.tags_wrap, self.accented_check)
 
         self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
-                                max_children_per_line=4, column_spacing=8, row_spacing=8, valign=Gtk.Align.START)
+                                # no real cap: a wider window gets more cards per row, not wider cards.
+                                # Each row is still filled, so a card is at most one card's share wider.
+                                max_children_per_line=MAX_CARDS_PER_ROW, column_spacing=8, row_spacing=8, valign=Gtk.Align.START)
         self.grid.add_css_class("scene-grid")
         scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_child(self.grid)
@@ -534,7 +545,7 @@ class MainWindow(Adw.ApplicationWindow):
         elif action == "step":
             self.act_step(arg)
         elif action == "scene-key":
-            sid = vm.scene_for_key(arg, self.library.ids(), self.cfg.bindings.keys)
+            sid = vm.scene_for_key(arg, self.visible_ids(), self.cfg.bindings.keys)  # numbered as the cards show
             if sid:
                 self.act_scene(sid)
         elif action == "brightness":
@@ -834,6 +845,8 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception as e:  # noqa: BLE001
             self.toast(f"Could not save the accent color: {e}")
         self._refresh_accent()
+        if self.previews:
+            self.previews.request_sync(ACCENT_PREVIEW_DELAY_MS, restart=True)
 
     def _on_accent_chosen(self, color: str) -> None:
         self.accent_popover.popdown()
@@ -1057,7 +1070,9 @@ class MainWindow(Adw.ApplicationWindow):
         key = (tuple(ids), current, self.connected)
         if key != self._cards_key:
             self._cards_key = key
-            self._rebuild_cards(ids, current, all_ids)
+            self._rebuild_cards(ids, current)
+        if self.previews:
+            self.previews.request_sync()
         self.scene_stack.set_visible_child_name("grid" if ids else "no-match" if all_ids else "empty")
         self.manual_btn.set_active(mode not in ("random", "sequence"))
         self.random_btn.set_active(mode == "random")
@@ -1068,28 +1083,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.trans_dd.set_selected(self.trans_idx)
         self.len_dd.set_selected(self.len_idx)
 
-    def _rebuild_cards(self, ids: list[str], current: str | None, all_ids: list[str]) -> None:
+    def _rebuild_cards(self, ids: list[str], current: str | None) -> None:
         while (c := self.grid.get_first_child()) is not None:
             self.grid.remove(c)
-        keys = vm.hotkeys(all_ids, self.cfg.bindings.keys)  # a scene keeps its key while the filter hides others
+        keys = vm.hotkeys(ids, self.cfg.bindings.keys)  # renumbered by the filter: the first card shown is always 1
         for sid in ids:
             sc = self.library.scenes[sid]
             live = sid == current
-            thumb = Gtk.Box(vexpand=True, hexpand=True)
+            btn = Gtk.Button()
+            thumb = Gtk.Overlay()
             thumb.add_css_class("thumb")
+            if self.previews:  # the card's full width, at least THUMB_W, always 16:9
+                thumb.set_child(PreviewPicture(self.previews, sid, THUMB_W, THUMB_H, hover_on=btn, frame=thumb, grow=True))
+            else:
+                thumb.set_size_request(THUMB_W, THUMB_H)
             if live:
                 chip = label("Live", "live-chip", xalign=0.5)
                 chip.set_halign(Gtk.Align.START)
                 chip.set_valign(Gtk.Align.START)
-                thumb.append(chip)
+                thumb.add_overlay(chip)
             name = label(sc.name or vm.display_name(sid), "name", hexpand=True)
             name.set_ellipsize(3)  # Pango.EllipsizeMode.END
-            name.set_max_width_chars(9)  # natural width, so four cards fit in a row at 960 px
+            name.set_max_width_chars(14)  # natural width: the preview, not the name, sets the card's width
             top = hbox(6, name, *([kbd(keys[sid])] if sid in keys else []))
-            tags = Adw.WrapBox(child_spacing=4, line_spacing=4)  # wraps, so tags never force the card wider
+            tags = Adw.WrapBox(child_spacing=8, line_spacing=2)  # wraps, so tags never force the card wider
             for t in sc.tags[:3]:
-                tags.append(label(t, "tag"))
-            btn = Gtk.Button()
+                tags.append(label(t, "card-tag"))  # plain text: unlike the filter chips above, these are not buttons
             btn.add_css_class("scene-card")
             set_classes(btn, {"live": live})
             btn.set_child(vbox(6, thumb, top, tags))
@@ -1239,6 +1258,22 @@ class MainWindow(Adw.ApplicationWindow):
         if self.starting and time.monotonic() > self._start_deadline and not self.connected:
             self.refresh()
         return True  # keep ticking
+
+    def _preview_look(self) -> Look:
+        scale = max(1, self.get_scale_factor())
+        ball = self.cfg.ball
+        return Look(
+            width=round(THUMB_W * scale * OVERSAMPLE), height=round(THUMB_H * scale * OVERSAMPLE), accent=tokens.hex_to_rgb(self.accent_hex()),
+            tile=ball.row_pitch_deg or DEFAULT_TILE_DEG, row_offset=ball.row_offset_deg if ball.row_pitch_deg else None,
+            beats_per_bar=self.cfg.clock.beats_per_bar, bpm=self.cfg.clock.bpm,
+        )
+
+    def _preview_beat(self) -> float:
+        """The beat a hovered preview plays at: the show's, or the configured tempo with no renderer."""
+        st = self.state if self.connected else None
+        if st:
+            return vm.live_beat(st["clock"], time.monotonic() - self.state_time)
+        return time.monotonic() * self.cfg.clock.bpm / 60.0
 
     def _update_countdown(self, st: dict[str, Any] | None) -> None:
         self.countdown.set_fraction(vm.change_progress(st, time.monotonic() - self.state_time) if st else None)

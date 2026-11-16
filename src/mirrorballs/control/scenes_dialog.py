@@ -18,8 +18,10 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from ..common import paths  # noqa: E402
 from . import scene_files as sf  # noqa: E402
 from . import viewmodel as vm  # noqa: E402
+from .preview_widgets import PreviewPicture  # noqa: E402
 from .widgets import SettingsGroup, hbox, icon, kbd, label, push_button, set_classes, status_chip, vbox  # noqa: E402
 
+ROW_PREVIEW_W, ROW_PREVIEW_H = 96, 54
 REFRESH_MS = 1000  # a stat() per scene file, so the list notices edits made outside the app
 
 
@@ -97,6 +99,9 @@ class ScenesDialog(Adw.Window):
         g.clear()
         ids = self.library.ids()
         keys = vm.hotkeys(ids, self.cfg.bindings.keys)
+        previews = getattr(self.main, "previews", None)
+        if previews:
+            previews.request_sync()  # a file was added, copied or edited: its preview follows
         rows: list[tuple[str, bool]] = [(sid, True) for sid in ids] + [(sid, False) for sid in sorted(self.library.errors) if sid not in ids]
         rows.sort(key=lambda r: r[0])
         if self.selected_scene not in {r[0] for r in rows}:
@@ -115,7 +120,14 @@ class ScenesDialog(Adw.Window):
                 from .widgets import kbd
 
                 controls.append(kbd(keys[sid]))
-            row = hbox(12, status, text, hbox(8, *controls, valign=Gtk.Align.CENTER))
+            row = hbox(12, status)
+            if ok and previews:
+                pic = PreviewPicture(previews, sid, ROW_PREVIEW_W, ROW_PREVIEW_H, hover_on=row)
+                pic.add_css_class("row-preview")
+                pic.set_valign(Gtk.Align.CENTER)
+                row.append(pic)
+            row.append(text)
+            row.append(hbox(8, *controls, valign=Gtk.Align.CENTER))
             row.add_css_class("setting-row")
             set_classes(row, {"selected": sid == self.selected_scene})
             click = Gtk.GestureClick()
