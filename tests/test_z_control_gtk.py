@@ -145,9 +145,11 @@ def test_commands_sent_by_the_ui(win):
     w.run_action("mode", "random")
     w.run_action("brightness", +5)
     assert pump_until(lambda: any(c == "master.set" for c, _ in fake.sent))  # brightness is debounced
-    cmds = [c for c, _ in fake.sent]
+    assert fake.sent[0] == ("audio.preview", {"on": True})  # on connecting: the audio picker's meters
+    ui = [(c, kw) for c, kw in fake.sent if not c.endswith(".preview")]
+    cmds = [c for c, _ in ui]
     assert cmds[:2] == ["running.set", "tap"]
-    assert fake.sent[0][1] == {"running": False}
+    assert ui[0][1] == {"running": False}
     scene_cmds = [(c, kw) for c, kw in fake.sent if c == "scene.set"]
     assert scene_cmds and scene_cmds[0][1]["scene"] == "beta"
     assert scene_cmds[0][1]["transition"] == {"type": "crossfade", "beats": 1.0}  # ¼ bar of 4 beats, default UI selection
@@ -187,7 +189,7 @@ def test_tap_tempo_belongs_to_the_internal_clock_only(win, tmp_path):
     w.apply_state(st(clock=dict(st()["clock"], source="midi", port="X")))
     assert not w.tap_btn.get_visible()
     w.run_action("tap")
-    assert not fake.sent  # the MIDI clock owns the tempo
+    assert ("tap", {}) not in fake.sent  # the MIDI clock owns the tempo
 
 
 def test_the_clock_and_sequence_shortcuts(win, tmp_path):
@@ -196,14 +198,14 @@ def test_the_clock_and_sequence_shortcuts(win, tmp_path):
     w.apply_state(st())
     w.run_action("mode", "sequence")
     assert ("mode.set", {"mode": "sequence"}) in fake.sent
-    w.run_action("clock-source")  # no port configured: it says so instead of switching
-    assert w.store.load().clock.source == "internal"
-    w.store.update({"clock": {"midi_port": "X"}})
-    w.cfg = w.store.load()
-    w.refresh()
+    # C goes round the clocks; without a port MIDI is still chosen, and the picker below asks for one
     w.run_action("clock-source")
-    assert w.store.load().clock.source == "midi"
-    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="X")))
+    assert w.store.load().clock.source == "midi" and w.midi_picker.get_visible()
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port=None)))
+    w._clock_hold = 0.0
+    w.run_action("clock-source")
+    assert w.store.load().clock.source == "audio" and w.audio_picker.get_visible()
+    w.apply_state(st(clock=dict(st()["clock"], source="audio")))
     w._clock_hold = 0.0
     w.run_action("clock-source")
     assert w.store.load().clock.source == "internal"
@@ -296,6 +298,7 @@ def test_scrolling_the_bpm_chip_sets_the_internal_tempo_only(win):
     assert fake.sent == []
     w.apply_state(st(clock=dict(st()["clock"], source="midi", bpm=124.0)))
     w._bpm_hold = 0.0
+    fake.sent.clear()  # (showing the MIDI picker asked for the port previews)
     assert not w._on_bpm_scroll(None, 0, -1.0) and fake.sent == []
     assert "MIDI" in w.source_box.get_tooltip_text()
 
@@ -464,12 +467,12 @@ def test_the_clock_can_be_switched_from_the_main_window(win, tmp_path):
     w, fake = win
     w.set_connection(True)
     w.apply_state(st())
-    # without a configured port there is nothing to switch to
-    assert w.clock_seg.selected() == "internal" and not w.clock_seg.buttons["midi"].get_sensitive()
+    # every clock can be chosen: without a port or source the picker below the strip asks for one
+    assert w.clock_seg.selected() == "internal"
+    assert all(b.get_sensitive() for b in w.clock_seg.buttons.values())
     w.store.update({"clock": {"midi_port": "VirMIDI 1-0"}})
     w.cfg = w.store.load()
     w.refresh()
-    assert w.clock_seg.buttons["midi"].get_sensitive()
     fake.sent.clear()
     w.clock_seg.buttons["midi"].set_active(True)  # a click during the show
     assert w.store.load().clock.source == "midi" and ("reload", {}) in fake.sent
@@ -481,7 +484,9 @@ def test_the_clock_can_be_switched_from_the_main_window(win, tmp_path):
     w.apply_state(st(clock=dict(st()["clock"], source="midi", port="VirMIDI 1-0")))
     assert w.clock_seg.selected() == "midi"
     w.apply_state(st())
-    assert w.clock_seg.selected() == "internal" and not fake.sent
+    assert w.clock_seg.selected() == "internal"
+    # nothing but the MIDI port previews, on while the MIDI picker showed and off again
+    assert fake.sent == [("midi.preview", {"on": False})]
 
 
 def test_closing_while_the_show_runs_asks_about_the_renderer(win):
@@ -1331,3 +1336,138 @@ def test_hotkeys_are_renumbered_by_the_filter(win, tmp_path):
     assert w.visible_ids() == ["gamma"] and "1" in texts(cards(w)[0])
     w.run_action("scene-key", "1")
     assert fake.sent[-1][0] == "scene.set" and fake.sent[-1][1]["scene"] == "gamma"
+
+
+# --- clock sources: the audio and MIDI pickers ------------------------------------------------
+
+
+def audio_state(source="alsa_output.speakers", locked=True, speakers_db=-14.0, mic_db=-90.0, error=None, running=True):
+    return {"running": running, "error": error, "source": source, "wanted": source, "throttled": False, "previewing": True,
+            "sources": [{"id": "alsa_output.speakers", "name": "Monitor of Speakers", "kind": "monitor", "channels": 2,
+                         "rms_db": [speakers_db, speakers_db - 2], "peak_db": [speakers_db + 6, speakers_db + 4]},
+                        {"id": "alsa_input.mic", "name": "Built-in mic", "kind": "mic", "channels": 2,
+                         "rms_db": [mic_db, mic_db], "peak_db": [mic_db, mic_db]}],
+            "tracking": {"bpm": 124.3, "confidence": 0.7, "locked": locked, "anchor_time": time.monotonic(),
+                         "anchor_beat": 0.0},
+            "health": None}
+
+
+MIDI_PORTS = [{"name": "Mixxx 1", "status": "beats", "bpm": 100.0, "beat_time": 0.0, "note": 50},
+              {"name": "Pads", "status": "active", "bpm": None, "beat_time": None, "note": None}]
+
+
+def toasts_of(w):
+    shown = []
+    w.toast = shown.append
+    return shown
+
+
+def test_the_audio_picker_shows_every_source_with_its_meter_and_picks_one(win):
+    w, fake = win
+    shown = toasts_of(w)
+    w.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    w.apply_state(st(clock=dict(st()["clock"], source="audio", bpm=124.3), audio=audio_state()))
+    assert w.audio_picker.get_visible() and not w.midi_picker.get_visible()
+    chips = w.audio_picker.chips
+    assert list(chips) == ["alsa_output.speakers", "alsa_input.mic"]
+    assert chips["alsa_output.speakers"].get_active() and chips["alsa_output.speakers"].status.get_text() == "124 BPM"
+    assert chips["alsa_output.speakers"].meter.levels == (-14.0, -16.0)
+    assert chips["alsa_input.mic"].status.get_text() == "silent" and chips["alsa_input.mic"].has_css_class("dim")
+    assert w.source_chip.get_text() == "Audio · 124.3 BPM · Monitor of Speakers"
+    fake.sent.clear()
+    chips["alsa_input.mic"].set_active(True)  # a click
+    assert w.store.load().clock.audio_source == "alsa_input.mic" and ("reload", {}) in fake.sent
+    assert shown[-1] == "Audio · Built-in mic is silent"
+
+
+def test_levels_move_without_refreshing_the_window(win):
+    w, _ = win
+    w.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state()))
+    refreshes = []
+    real = w.refresh
+    w.refresh = lambda: (refreshes.append(1), real())
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-30.0)))
+    w.audio_picker.chips["alsa_output.speakers"].meter._painted = 0.0  # not throttled for the next one
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-8.0)))
+    assert not refreshes
+    assert w.audio_picker.chips["alsa_output.speakers"].meter.levels == (-8.0, -10.0)
+
+
+def test_switching_to_a_source_without_a_beat_says_so(win):
+    w, _ = win
+    shown = toasts_of(w)
+    w.store.update({"clock": {"audio_source": "alsa_output.speakers"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    w.apply_state(st(audio=audio_state(locked=False)))
+    w.clock_seg.buttons["audio"].set_active(True)
+    assert w.store.load().clock.source == "audio"
+    assert shown[-1] == "Audio clock · Monitor of Speakers has no beat yet: holding 120 BPM"
+
+
+def test_the_hover_over_audio_shows_the_chosen_sources_tempo(win):
+    w, _ = win
+    w.store.update({"clock": {"audio_source": "alsa_output.speakers"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    w.apply_state(st(audio=audio_state()))
+    w.audio_hover.show_now()
+    pump(50)
+    assert w.audio_hover.visible and w.audio_hover.text.get_text() == "Monitor of Speakers · 124.3 BPM"
+    w.apply_state(st(audio=audio_state(locked=False)))
+    assert w.audio_hover.text.get_text() == "Monitor of Speakers · no beat yet"
+    w.audio_hover.hide()
+    pump(50)
+    assert not w.audio_hover.visible
+
+
+def test_the_midi_picker_previews_ports_only_while_it_shows(win):
+    w, fake = win
+    shown = toasts_of(w)
+    w.store.update({"clock": {"source": "midi", "midi_port": "mixxx"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    fake.sent.clear()
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="Mixxx 1"), midi_ports=MIDI_PORTS))
+    assert ("midi.preview", {"on": True}) in fake.sent and w.midi_picker.get_visible()
+    chips = w.midi_picker.chips
+    assert chips["Mixxx 1"].get_active() and chips["Mixxx 1"].status.get_text() == "100 BPM"
+    assert chips["Pads"].status.get_text() == "no beat"
+    chips["Pads"].set_active(True)
+    assert w.store.load().clock.midi_port == "Pads" and shown[-1] == "MIDI · Pads · no beat on this port yet"
+    fake.sent.clear()
+    w.apply_state(st())  # back on the internal clock
+    w._clock_hold = 0.0
+    w.apply_state(st())
+    assert ("midi.preview", {"on": False}) in fake.sent and not w.midi_picker.get_visible()
+
+
+def test_an_unavailable_listener_gets_a_banner_that_goes_back_to_internal(win):
+    w, _ = win
+    w.set_connection(True)
+    w.apply_state(st(clock=dict(st()["clock"], source="audio", locked=False),
+                     audio=audio_state(error="audio needs PyGObject and GStreamer", running=False)))
+    assert any("not running: audio needs PyGObject" in t for t in texts(w.banner_box))
+    assert w.source_chip.get_text() == "Audio · not available"
+
+
+def test_the_preferences_audio_page_lists_sources_and_saves(cfgwin):
+    w, fake, tmp = cfgwin
+    w.apply_state(st(audio=audio_state(source=None)))
+    w.open_preferences()
+    d = w.preferences_dialog
+    d.on_state(st(audio=audio_state(source=None)))
+    d.clock_seg.buttons["audio"].set_active(True)
+    names = [d.audio_dd.get_model().get_string(i) for i in range(d.audio_dd.get_model().get_n_items())]
+    assert names == ["Select a source…", "Monitor of Speakers", "Built-in mic"]
+    d.audio_dd.set_selected(1)
+    d.audio_min.set_value(100, notify=True)
+    d._flush()
+    c = load_config(tmp / "config.yaml").clock
+    assert (c.source, c.audio_source, c.audio_min_bpm) == ("audio", "alsa_output.speakers", 100.0)
+    d.close()

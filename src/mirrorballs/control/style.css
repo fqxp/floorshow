@@ -165,3 +165,13 @@ button.swatch-choice:hover { background: @bg3; }
 button.swatch-choice.chosen { border-color: @acc; }
 .learn-bar { background: @acc_bg; border: 1px solid @acc_line; border-radius: 0.86em; padding: 0.71em 1em; }
 .amber-text { color: @amber_t; font-weight: 700; }
+/* source picker under the clock strip: audio sources with level meters, MIDI ports with beat previews */
+.source-picker { min-height: 2.14em; }
+.source-chip .chip-status { color: @t3; font-size: 0.93em; }
+.source-chip:checked .chip-status { color: @t2; }
+.source-chip.dim { opacity: 0.55; }
+.source-chip .chip-kind { color: @t3; -gtk-icon-size: 0.93em; }
+.level-meter { min-height: 1.07em; }   /* one column per channel; the width follows the channel count */
+.pulse { min-width: 0.79em; min-height: 0.79em; }
+popover.hover-preview > contents { background: @bg3; border: 1px solid @line2; border-radius: 0.64em; padding: 0.5em 0.79em; color: @t1; }
+popover.hover-preview .pulse { min-width: 0.86em; min-height: 0.86em; }

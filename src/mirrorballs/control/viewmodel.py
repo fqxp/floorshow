@@ -45,7 +45,7 @@ def midi_input_status(state: dict[str, Any]) -> tuple[str, str]:
     """(text, kind) for the MIDI clock input: what is wrong, or that it works. kind: "ok" | "warn" | "" (not used)."""
     clock = state["clock"]
     if clock["source"] != "midi":
-        return "Not used (internal clock)", ""
+        return f"Not used ({clock['source']} clock)", ""
     midi = state.get("midi")
     port = (midi or {}).get("clock") or {}
     if midi and not port.get("wanted"):  # an empty "midi" means the renderer did not say
@@ -58,14 +58,19 @@ def midi_input_status(state: dict[str, Any]) -> tuple[str, str]:
 
 
 def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_port: str | None = None,
-               cfg_bpm: float = 120.0, midi: dict[str, Any] | None = None) -> tuple[str, bool]:
+               cfg_bpm: float = 120.0, midi: dict[str, Any] | None = None, cfg_audio: str | None = None,
+               audio: dict[str, Any] | None = None) -> tuple[str, bool]:
     """(source chip text, is_warning). Uses the live clock when connected, else the saved config."""
     if clock is None:
         if cfg_source == "midi":
             return f"MIDI · {cfg_port or 'no port selected'} · not running", False
+        if cfg_source == "audio":
+            return f"Audio · {cfg_audio or 'no source chosen'} · not running", False
         return f"Internal · {cfg_bpm:.0f} BPM", False
     if clock["source"] == "internal":
         return f"Internal · {clock['bpm']:.0f} BPM", False
+    if clock["source"] == "audio":
+        return audio_clock_text(clock, audio or {})
     port = clock.get("port") or "MIDI"
     wired = (midi or {}).get("clock") or {}
     if midi and not wired.get("wanted"):
@@ -76,6 +81,20 @@ def clock_text(clock: dict[str, Any] | None, cfg_source: str = "internal", cfg_p
         what = "beat notes" if clock.get("midi_mode") == "beats" else "clock"
         return f"MIDI · waiting for {what} (holding {clock['bpm']:.0f} BPM)", True
     return f"MIDI · {clock['bpm']:.1f} BPM · {port}", False  # tempo before the port: the chip truncates from the right
+
+
+def audio_clock_text(clock: dict[str, Any], audio: dict[str, Any]) -> tuple[str, bool]:
+    """The source chip while the audio clock drives the show."""
+    if audio.get("error") and not audio.get("running"):
+        return "Audio · not available", True
+    sid = audio.get("source")
+    if not sid:
+        wanted = audio.get("wanted")
+        return (f"Audio · {wanted} not found", True) if wanted else ("Audio · no source chosen", True)
+    name = next((s["name"] for s in audio.get("sources") or [] if s["id"] == sid), sid)
+    if not clock["locked"]:
+        return f"Audio · listening for a beat (holding {clock['bpm']:.0f} BPM)", True
+    return f"Audio · {clock['bpm']:.1f} BPM · {name}", False  # tempo first: the chip truncates from the right
 
 
 def live_beat(clock: dict[str, Any], elapsed_s: float = 0.0) -> float:
@@ -92,7 +111,8 @@ def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, flo
 
 @dataclass(frozen=True)
 class Banner:
-    kind: str  # "renderer_outdated" | "midi_lost" | "scene_error" | "config_error" | "output_hidden" | "calibrating"
+    kind: str  # "renderer_outdated" | "midi_lost" | "audio_unavailable" | "scene_error" | "config_error" | "output_hidden"
+    # | "calibrating"
     title: str
     text: str
     action: str | None  # button label; None = a plain notice
@@ -121,6 +141,13 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
     if clock["source"] == "midi" and not clock["locked"]:
         out.append(Banner("midi_lost", "MIDI clock lost",
                           f"MIDI clock lost. Holding the last tempo ({clock['bpm']:.0f} BPM).", "Use internal clock"))
+    audio = state.get("audio") or {}
+    # A break without a beat is normal music, so a missing beat is only the chip's warning; a listener that cannot
+    # run at all is worth a banner.
+    if clock["source"] == "audio" and audio.get("error") and not audio.get("running"):
+        out.append(Banner("audio_unavailable", "Audio not available",
+                          f"Beat detection on audio is not running: {audio['error']}. Holding {clock['bpm']:.0f} BPM.",
+                          "Use internal clock"))
     for sid, problems in state.get("scene_errors", {}).items():
         out.append(Banner("scene_error", "File error", f"{sid}.yaml · {problems[0]}", "Open in editor", scene_id=sid))
         break  # one banner at a time; the scenes dialog lists all of them

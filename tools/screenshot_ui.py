@@ -44,15 +44,22 @@ def pump(ms=500):
         ctx.iteration(False)
 
 
-def shot(win, name):
+def shot(win, name, widget=None):
     pump(400)
     win.state_time = time.monotonic()  # freeze the beat at the sampled position (the pump above took real time)
     pump(30)
+    if widget is not None:  # e.g. a popover, which is not part of the window's own drawing
+        win = widget
     w, h = win.get_width(), win.get_height()
     print("size", w, h, "min", win.get_preferred_size().minimum_size.width, win.get_preferred_size().minimum_size.height)
-    snap = Gtk.Snapshot()
-    Gtk.WidgetPaintable.new(win).snapshot(snap, w, h)
-    tex = win.get_native().get_renderer().render_texture(snap.to_node(), Graphene.Rect().init(0, 0, w, h))
+    for _ in range(20):  # mid-redraw the paintable can come out empty (seen under Broadway): wait for a frame
+        snap = Gtk.Snapshot()
+        Gtk.WidgetPaintable.new(win).snapshot(snap, w, h)
+        node = snap.to_node()
+        if node is not None:
+            break
+        pump(50)
+    tex = win.get_native().get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
     tex.save_to_png(str(OUT / f"{name}.png"))
     print("saved", name, w, h)
 
@@ -62,7 +69,8 @@ def on_activate(app):
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     tokens.pin_base_font()  # shots are of the design, at the size it was drawn
-    provider.load_from_string(tokens.css(True))
+    # no transitions: headless (Broadway) the frame clock barely runs, and a shot would catch one halfway
+    provider.load_from_string(tokens.css(True) + "\n* { transition: none; }\n")
 
     tmp = Path(tempfile.mkdtemp())
     scenes_dir = tmp / "scenes"
@@ -97,6 +105,37 @@ def on_activate(app):
     shot(win, "3_internal_halfway")
     win.apply_state(state("kick-spot", ids, clock=clock(locked=False, bpm=118.0, status="waiting for clock", beat=5.5)))
     shot(win, "4_midi_lost")
+    # the audio clock with its source picker: a meter per channel, the chosen source's tempo
+    audio = {"running": True, "error": None, "source": "alsa_output.speakers", "wanted": "alsa_output.speakers",
+             "throttled": False, "previewing": True, "health": None,
+             "sources": [{"id": "alsa_output.speakers", "name": "Monitor of Speakers", "kind": "monitor", "channels": 2,
+                          "rms_db": [-12.0, -14.5], "peak_db": [-5.0, -6.0]},
+                         {"id": "alsa_output.hdmi", "name": "Monitor of HDMI", "kind": "monitor", "channels": 8,
+                          "rms_db": [-100.0] * 8, "peak_db": [-100.0] * 8},
+                         {"id": "alsa_input.mic", "name": "Built-in Audio", "kind": "mic", "channels": 2,
+                          "rms_db": [-38.0, -40.0], "peak_db": [-30.0, -31.0]}],
+             "tracking": {"bpm": 124.3, "confidence": 0.8, "locked": True, "anchor_time": time.monotonic(), "anchor_beat": 0.0}}
+    win.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
+    win.cfg = win.store.load()
+    win.apply_state(state("kick-spot", ids, clock=clock(source="audio", port=None, bpm=124.3, beat=6.02), audio=audio))
+    shot(win, "10_audio_picker")
+    win.store.update({"clock": {"source": "midi", "midi_port": "Mixxx"}})
+    win.cfg = win.store.load()
+    ports = [{"name": "Mixxx 1", "status": "beats", "bpm": 124.0, "beat_time": time.monotonic(), "note": 50},
+             {"name": "RtMidiOut Client:Arturia BeatStep 24:0", "status": "clock", "bpm": 124.0, "beat_time": time.monotonic(), "note": None},
+             {"name": "VirMIDI 1-0 (raw hw:1,0)", "status": "busy", "bpm": None, "beat_time": None, "note": None},
+             {"name": "Pads", "status": "quiet", "bpm": None, "beat_time": None, "note": None}]
+    win.apply_state(state("kick-spot", ids, clock=clock(port="Mixxx 1", beat=6.02), midi_ports=ports, audio=audio))
+    win._clock_hold = 0.0
+    shot(win, "11_midi_picker")
+    win.store.update({"clock": {"source": "internal"}})
+    win.cfg = win.store.load()
+    win.apply_state(state("kick-spot", ids, clock=clock(source="internal", port=None, bpm=120.0, beat=5.5), audio=audio))
+    win._clock_hold = 0.0
+    win.audio_hover.revealer.set_transition_duration(0)  # its slide would be caught halfway, like a CSS transition
+    win.audio_hover.show_now()
+    shot(win, "12_audio_hover", win.audio_hover.pop)  # a popover is its own surface: shot on its own
+    win.audio_hover.hide()
     win.apply_state(state("kick-spot", ids, scene_errors={"strobe-grid": ["line 12: unknown field “widht”"]}))
     shot(win, "5_scene_error")
     win.apply_state(state("kick-spot", ids, calibrating=True))

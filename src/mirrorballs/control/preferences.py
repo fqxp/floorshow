@@ -15,7 +15,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from . import config_model as cm  # noqa: E402
-from . import viewmodel as vm  # noqa: E402
+from . import sources_model as sm, viewmodel as vm  # noqa: E402
 from .midi_ports import list_input_ports  # noqa: E402
 from .widgets import (  # noqa: E402
     Segmented, SettingsGroup, Stepper, dropdown, hbox, icon, label, push_button, set_classes, setting_row, status_chip,
@@ -123,7 +123,8 @@ class PreferencesDialog(Adw.Window):
 
     def _page_clock(self, page: Gtk.Box) -> None:
         c = self.cfg.clock
-        self.clock_seg = Segmented([("midi", "MIDI clock"), ("internal", "Internal BPM")], c.source, self._on_clock_source, fill=True)
+        self.clock_seg = Segmented([("midi", "MIDI clock"), ("internal", "Internal BPM"), ("audio", "Audio")], c.source,
+                                   self._on_clock_source, fill=True)
         page.append(self.clock_seg)
         self.clock_stack = Gtk.Stack()
         # MIDI
@@ -152,6 +153,7 @@ class PreferencesDialog(Adw.Window):
         gi_ = SettingsGroup("Internal tempo")
         gi_.add(setting_row("Tempo", "Default 120 BPM. Tap tempo on the main window sets this value.", entry, label("BPM", "secondary")))
         self.clock_stack.add_named(gi_, "internal")
+        self.clock_stack.add_named(self._audio_group(), "audio")
         page.append(self.clock_stack)
         self.clock_stack.set_visible_child_name(c.source)
         # timing
@@ -162,6 +164,65 @@ class PreferencesDialog(Adw.Window):
         t.add(setting_row("Beats per bar", "Sets the downbeat and the “every N bars” counter.", self.bpb))
         t.add(setting_row("Beat offset", "Shift the beat to cancel projector latency. Positive means later.", self.offset))
         page.append(t)
+
+    def _audio_group(self) -> Gtk.Widget:
+        c = self.cfg.clock
+        self._audio_sources: list[tuple[str, str]] = []  # (id, name) as the dropdown lists them
+        self._audio_key: Any = None
+        self.audio_dd = dropdown([], 0, 260, self._on_audio_source)
+        self._fill_audio_sources([])
+        self.audio_status = label("", "secondary")
+        g = SettingsGroup("Audio input")
+        g.add(setting_row("Source", "An output (what this computer plays, e.g. a DJ program) or an input. Line level "
+                          "works best; a microphone is best effort. The main window lists them with level meters.",
+                          self.audio_dd))
+        g.add(setting_row("Status", None, self.audio_status))
+        bpm = lambda v: f"<b>{v:.0f}</b> BPM"  # noqa: E731
+        self.audio_min = Stepper(c.audio_min_bpm, 20, 300, 5, bpm, lambda v: self._save_tempo_range(v, None))
+        self.audio_max = Stepper(c.audio_max_bpm, 20, 300, 5, bpm, lambda v: self._save_tempo_range(None, v))
+        g.add(setting_row("Slowest tempo", "The beat detection looks between these two. Drum and bass (174) reads as 87 "
+                          "unless the slowest is above 87.", self.audio_min))
+        g.add(setting_row("Fastest tempo", None, self.audio_max))
+        self.audio_offset = Stepper(c.audio_offset_ms, -500, 500, 5, lambda v: f"<b>{v:.0f}</b> ms",
+                                    lambda v: self.save("clock", {"audio_offset_ms": v}))
+        g.add(setting_row("Audio offset", "Added to the beat offset while the audio clock drives the show: the delay "
+                          "of the sound path. Positive means later.", self.audio_offset))
+        note_box = hbox(12, icon("dialog-information-symbolic", 18), label(
+            "The music does not say which beat starts the bar. Press the downbeat button (D) on the first beat of a bar.",
+            "secondary", wrap=True, hexpand=True))
+        note_box.add_css_class("note-box")
+        return vbox(16, g, note_box)
+
+    def _fill_audio_sources(self, sources: list[dict[str, Any]]) -> None:
+        saved = self.cfg.clock.audio_source
+        items = [(s["id"], s["name"]) for s in sources]
+        if saved and not any(saved == i or saved.lower() in (i + " " + n).lower() for i, n in items):
+            items.insert(0, (saved, f"{saved} (not there)"))
+        elif not saved:
+            items.insert(0, ("", "Select a source…" if sources else "No audio source found"))
+        self._audio_sources = items
+        self._guard = True
+        try:
+            self.audio_dd.set_model(Gtk.StringList.new([n for _, n in items]))
+            want = (saved or "").lower()
+            idx = next((k for k, (i, n) in enumerate(items) if want and (i == saved or want in (i + " " + n).lower())), 0)
+            self.audio_dd.set_selected(idx)
+        finally:
+            self._guard = False
+
+    def _on_audio_source(self, idx: int) -> None:
+        if 0 <= idx < len(self._audio_sources) and self._audio_sources[idx][0]:
+            sid = self._audio_sources[idx][0]
+            if sid != self.cfg.clock.audio_source:
+                self.save("clock", {"audio_source": sid})
+
+    def _save_tempo_range(self, lo: float | None, hi: float | None) -> None:
+        lo = self.audio_min.value if lo is None else lo
+        hi = self.audio_max.value if hi is None else hi
+        if hi < 1.5 * lo:  # the config insists on a range that holds a tempo and its half or double
+            self.audio_status.set_text("The fastest tempo must be at least 1.5 times the slowest.")
+            return
+        self.save("clock", {"audio_min_bpm": lo, "audio_max_bpm": hi})
 
     def _beat_notes_group(self) -> Gtk.Widget:
         c = self.cfg.clock
@@ -403,6 +464,14 @@ class PreferencesDialog(Adw.Window):
             self.midi_status.remove(c)
         text, kind = vm.midi_input_status(state)
         self.midi_status.append(status_chip(text, kind))
+        audio = state.get("audio") or {}
+        key = [(s["id"], s["name"]) for s in audio.get("sources") or []]
+        if key != self._audio_key:
+            self._audio_key = key
+            self._fill_audio_sources(audio.get("sources") or [])
+        hover, _ = sm.hover_text(audio, self.cfg.clock.audio_source)
+        if self.audio_status.get_text() != hover:
+            self.audio_status.set_text(hover)
         self._rebuild_mappings_if_connection_changed()
 
     def on_connection(self, _up: bool) -> None:

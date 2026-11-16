@@ -19,11 +19,12 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from ..common.scene import ParamDef  # noqa: E402
-from . import tokens, viewmodel as vm  # noqa: E402
+from . import sources_model as sm, tokens, viewmodel as vm  # noqa: E402
 from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
 from .preview_widgets import PreviewManager, PreviewPicture  # noqa: E402
 from .previews import DEFAULT_TILE_DEG, OVERSAMPLE, THUMB_H, THUMB_W, Look, PreviewCache  # noqa: E402
+from .source_picker import HoverPreview, SourcePicker  # noqa: E402
 from .store import ConfigStore  # noqa: E402
 from .widgets import Segmented, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
@@ -41,16 +42,19 @@ LIBRARY_CHECK_S = 1.0
 RESTART_DELAY_MS = 600  # let the old renderer release its socket before starting the new one
 ACCENT_PREVIEW_DELAY_MS = 1500  # remake accented previews once the accent has settled
 TRAIL_MAX_S = 2.0  # the slider's top end; the protocol allows more, but a trail this long is already a smear
+NO_BEAT_CHECK_MS = 8000  # after an audio source is picked, say so if it still has no beat by then
+CLOCK_SOURCES = [("internal", "Internal"), ("midi", "MIDI"), ("audio", "Audio")]
 
 
 def view_key(state: dict[str, Any]) -> str:
     """Everything in a state that the window shows, minus what moves every sample (the beat position, which
     the per-frame tick extrapolates itself). Equal keys mean a refresh would change nothing."""
     c = state["clock"]
-    volatile = {"clock", "fps", "output"}
+    volatile = {"clock", "fps", "output", "audio", "midi_ports"}  # levels and preview beats move all the time
     rest = {k: v for k, v in state.items() if k not in volatile}
     clock = (c["source"], c.get("port"), round(c["bpm"], 1), c["beats_per_bar"], c["locked"], c.get("status"))
-    return json.dumps([rest, clock, round(state.get("fps", 0)), state.get("output")], sort_keys=True, default=str)
+    return json.dumps([rest, clock, round(state.get("fps", 0)), state.get("output"), sm.stable_audio(state.get("audio")),
+                       sm.stable_midi(state.get("midi_ports"))], sort_keys=True, default=str)
 
 
 def param_title(text: str) -> Gtk.Label:
@@ -200,6 +204,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._bpm_hold = 0.0
         self._clock_hold = 0.0
         self._clock_target = "internal"
+        self._midi_previewing = False  # midi.preview is on (only while the MIDI picker shows: it opens every port)
+        self._no_beat_timer = 0
         self._view_key: str | None = None
         self._library_check = 0.0
         self._restart_pending = False
@@ -327,10 +333,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.source_box.add_controller(scroll)
         # The clock can change mid-show (a DJ program is started, or stops), so the switch belongs here and
         # not only in the configuration. Both write the same clock.source.
-        self.clock_seg = Segmented([("internal", "Internal"), ("midi", "MIDI")], self.cfg.clock.source,
-                                   self.set_clock_source)
+        self.clock_seg = Segmented(CLOCK_SOURCES, self.cfg.clock.source, self.set_clock_source)
+        # Resting the pointer on "Audio" shows the chosen audio source's tempo, so it is clear before switching
+        # whether that source has a beat at all.
+        self.audio_hover = HoverPreview(self.clock_seg.buttons["audio"], self._audio_hover_text)
+        # Below the strip, for the MIDI and audio clocks: what there is to listen to, and what each one carries
+        self.midi_picker = SourcePicker("MIDI port", False, self._pick_midi)
+        self.audio_picker = SourcePicker("Audio source", True, self._pick_audio)
         strip = vbox(10, hbox(12, self.source_box, Gtk.Box(hexpand=True), self.clock_seg),
                      hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn),
+                     self.midi_picker, self.audio_picker,
                      hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, strip, hexpand=True)
         self.clock_panel.add_css_class("panel")
@@ -648,28 +660,109 @@ class MainWindow(Adw.ApplicationWindow):
         if self.preferences_dialog:
             self.preferences_dialog.sync_clock_source()
         self.send("reload")
-        self.toast("Internal clock." if key == "internal" else f"MIDI clock · {self.cfg.clock.midi_port or 'no port selected'}")
+        self.audio_hover.hide()
+        st = self.state if self.connected else None
+        if key == "internal":
+            self.toast("Internal clock.")
+        elif key == "midi":
+            self.toast(f"MIDI clock · {self.cfg.clock.midi_port}" if self.cfg.clock.midi_port
+                       else "MIDI clock · pick a port below")
+        else:
+            holding = st["clock"]["bpm"] if st else self.cfg.clock.bpm
+            self.toast(sm.audio_switch_toast(st.get("audio") if st else None, self.cfg.clock.audio_source, holding))
+        self._refresh_clock(st)
 
     def toggle_clock_source(self) -> None:
-        """Key C: the other clock. Without a MIDI port there is nothing to switch to, so say so."""
-        if self.clock_seg.selected() == "midi":
-            self.set_clock_source("internal")
-        elif self.clock_seg.buttons["midi"].get_sensitive():
-            self.set_clock_source("midi")
-        else:
-            self.toast("Pick a MIDI port first: Preferences › Clock")
+        """Key C: the next clock, Internal → MIDI → Audio → Internal."""
+        keys = [k for k, _ in CLOCK_SOURCES]
+        self.set_clock_source(keys[(keys.index(self.clock_seg.selected()) + 1) % len(keys)])
 
     def _sync_clock_seg(self) -> None:
-        """Follow the renderer's clock (it is the authority) and keep MIDI out of reach without a port."""
+        """Follow the renderer's clock (it is the authority)."""
         st = self.state
         if time.monotonic() < self._clock_hold:
             self.clock_seg.select(self._clock_target)  # the renderer has not reloaded yet; do not snap back
         else:
             self.clock_seg.select(st["clock"]["source"] if st else self.cfg.clock.source)
-        has_port = bool(self.cfg.clock.midi_port)
-        self.clock_seg.buttons["midi"].set_sensitive(has_port)
-        self.clock_seg.buttons["midi"].set_tooltip_text(
-            None if has_port else "Pick a MIDI port first: Preferences › Clock")
+
+    def _shown_source(self) -> str:
+        return self.clock_seg.selected()
+
+    def _audio_hover_text(self) -> tuple[str, dict[str, Any] | None]:
+        st = self.state if self.connected else None
+        return sm.hover_text(st.get("audio") if st else None, self.cfg.clock.audio_source)
+
+    def _pick_audio(self, sid: str) -> None:
+        """A chip in the audio picker: listen to that source from now on."""
+        if self._ui_guard:
+            return
+        try:
+            self.store.update({"clock": {"audio_source": sid}})
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the audio source: {e}")
+            return
+        self.cfg = self.store.load()
+        self.send("reload")
+        items = {i.id: i for i in sm.audio_items((self.state or {}).get("audio"))}
+        item = items.get(sid)
+        self.toast(sm.audio_pick_toast(item, item.name if item else sid))
+        if self._no_beat_timer:
+            GLib.source_remove(self._no_beat_timer)
+        self._no_beat_timer = GLib.timeout_add(NO_BEAT_CHECK_MS, self._check_beat, sid)
+
+    def _check_beat(self, sid: str) -> bool:
+        self._no_beat_timer = 0
+        st = self.state if self.connected else None
+        text = sm.no_beat_toast(st.get("audio") if st else None, sid)
+        if text and self._shown_source() == "audio":
+            self.toast(text)
+        return False
+
+    def _pick_midi(self, name: str) -> None:
+        """A chip in the MIDI picker: that port drives the MIDI clock from now on."""
+        if self._ui_guard:
+            return
+        try:
+            self.store.update({"clock": {"midi_port": name}})
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the MIDI port: {e}")
+            return
+        self.cfg = self.store.load()
+        self.send("reload")
+        item = next((i for i in sm.midi_items((self.state or {}).get("midi_ports")) if i.id == name), None)
+        self.toast(sm.midi_pick_toast(item) if item else f"MIDI · {name}")
+        if self.preferences_dialog:
+            self.preferences_dialog.sync_clock_source()
+
+    def _set_midi_preview(self, on: bool) -> None:
+        """Every MIDI port is opened while this is on (a raw device then is busy for other programs), so it is only on
+        while the MIDI picker is on screen."""
+        if on != self._midi_previewing and self.connected:
+            if self.send("midi.preview", on=on):
+                self._midi_previewing = on
+
+    def _update_pickers(self, st: dict[str, Any] | None) -> None:
+        """The pickers' chips and meters: on every state, without the window's full refresh."""
+        shown = self._shown_source()
+        self.midi_picker.set_visible(shown == "midi" and st is not None)
+        self.audio_picker.set_visible(shown == "audio" and st is not None)
+        self._set_midi_preview(shown == "midi" and st is not None)
+        if st is None:
+            return
+        guard, self._ui_guard = self._ui_guard, True  # restored after: refresh() calls this with the guard already up
+        try:
+            if shown == "audio":
+                audio = st.get("audio")
+                self.audio_picker.set_items(sm.audio_items(audio), sm.selected_audio(audio, self.cfg.clock.audio_source),
+                                            "No audio source found" if audio else "")
+            elif shown == "midi":
+                ports = st.get("midi_ports")
+                self.midi_picker.set_items(sm.midi_items(ports), sm.selected_midi(ports, self.cfg.clock.midi_port),
+                                           "Looking for MIDI ports…" if not ports else "")
+        finally:
+            self._ui_guard = guard
+        if self.audio_hover.visible:
+            self.audio_hover.refresh()
 
     def act_downbeat(self) -> None:
         self.send("sync_downbeat")
@@ -773,7 +866,7 @@ class MainWindow(Adw.ApplicationWindow):
         Gtk.FileLauncher.new(Gio.File.new_for_path(str(d))).launch(self, None, None)
 
     def act_banner(self, banner: vm.Banner) -> None:
-        if banner.kind == "midi_lost":
+        if banner.kind in ("midi_lost", "audio_unavailable"):
             self.set_clock_source("internal")
         elif banner.kind == "scene_error" and banner.scene_id:
             p = self.library.path_of(banner.scene_id)
@@ -914,8 +1007,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def set_connection(self, up: bool) -> None:
         self.connected = up
+        self._midi_previewing = False  # a new connection starts without previews; a lost one ended them
         if up:
             self.starting = False
+            # Level meters of every audio source and the tempo of the chosen one, for the picker and the hover:
+            # cheap, so always on while this window is connected (the renderer ends it when we disconnect).
+            self.send("audio.preview", on=True)
         else:
             self.state = None
             if self._restart_pending:
@@ -941,10 +1038,14 @@ class MainWindow(Adw.ApplicationWindow):
             if self.library.refresh():
                 self._cards_key = None
                 changed = True
+        if was_connected is False and self.connected:
+            self.send("audio.preview", on=True)  # the first state after a (re)start, if set_connection was skipped
         key = view_key(state)
         if changed or key != self._view_key:
             self._view_key = key
             self.refresh()
+        else:
+            self._update_pickers(state)  # levels and preview tempos, without the full refresh
         for w in (self.preferences_dialog, self.calibration_window):
             if w:
                 w.on_state(state)
@@ -1007,17 +1108,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.run_label.set_text("Starting…" if busy else "Stop" if stop_mode else "Start")
 
     def _refresh_clock(self, st: dict[str, Any] | None) -> None:
-        text, warn = vm.clock_text(st["clock"] if st else None, self.cfg.clock.source, self.cfg.clock.midi_port,
-                                   self.cfg.clock.bpm,
-                                   st.get("midi") if st else None)
+        c = self.cfg.clock
+        text, warn = vm.clock_text(st["clock"] if st else None, c.source, c.midi_port, c.bpm, st.get("midi") if st else None,
+                                   c.audio_source, st.get("audio") if st else None)
         self.source_chip.set_text(text)
-        internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
-        self.source_box.set_tooltip_text(
-            f"{text}\n" + ("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock"))
+        source = st["clock"]["source"] if st else c.source
+        internal = source == "internal"
+        error = ((st or {}).get("audio") or {}).get("error") if source == "audio" else None
+        follows = {"internal": "Scroll to change the tempo", "midi": "The tempo follows the MIDI clock",
+                   "audio": "The tempo follows the music. Press Downbeat on the first beat of a bar."}[source]
+        self.source_box.set_tooltip_text(f"{text}\n{follows}" + (f"\n{error}" if error else ""))
         self.tap_btn.set_visible(internal)  # tapping cannot move a clock that another program owns
         set_classes(self.source_box, {"warn": warn})
         set_classes(self.pips_box, {"dim": st is None})
         self._sync_clock_seg()
+        self._update_pickers(st)
         if st:
             self.cfg_bpb = st["clock"]["beats_per_bar"]
             for i, p in enumerate(self._pips):
@@ -1255,6 +1360,10 @@ class MainWindow(Adw.ApplicationWindow):
             idx, phase = vm.beat_in_bar(st["clock"], time.monotonic() - self.state_time)
             self.beat_tile.set_intensity(tokens.beat_intensity(phase))
             self._set_pip(idx)
+        now = time.monotonic()
+        if self.midi_picker.get_visible():
+            self.midi_picker.tick(now)
+        self.audio_hover.tick(now)
         self._update_countdown(st)
         if self.starting and time.monotonic() > self._start_deadline and not self.connected:
             self.refresh()
@@ -1291,6 +1400,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.countdown.queue_draw()
         self.beat_tile.dark = dark
         self.beat_tile.queue_draw()
+        self.midi_picker.set_dark(dark)
+        self.audio_picker.set_dark(dark)
+        self.audio_hover.set_dark(dark)
 
     # --- dialogs -------------------------------------------------------------------------
 
@@ -1304,7 +1416,7 @@ class MainWindow(Adw.ApplicationWindow):
         rows = [
             ("Main window", [("Start / Stop", ["Ctrl", "Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]),
                              ("Blackout", ["Ctrl", "B"]), ("Blackout in a panic", ["Esc"] * vm.PANIC_ESCAPES),
-                             ("Internal / MIDI clock", ["C"]),
+                             ("Internal / MIDI / Audio clock", ["C"]),
                              ("Scene 1–10", ["1", "…", "9", "0"]), ("Previous / next scene", ["[", "]"]),
                              ("Manual / Random / Sequence", ["M", "R", "S"]), ("Brightness", ["Ctrl", "↑↓"]),
                              ("Preferences", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"]),
