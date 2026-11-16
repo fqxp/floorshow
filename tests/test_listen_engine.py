@@ -1,4 +1,5 @@
 import json
+import threading
 
 import numpy as np
 import pytest
@@ -19,8 +20,9 @@ class FakeClock:
 
 
 class FakeCapture:
-    def __init__(self, source, on_buffer, on_error):
-        self.source, self.on_buffer, self.on_error = source, on_buffer, on_error
+    def __init__(self, source, mode, on_buffer, on_level, on_error):
+        self.source, self.mode = source, mode
+        self.on_buffer, self.on_level, self.on_error = on_buffer, on_level, on_error
         self.stopped = False
         self.filled = 0
 
@@ -54,8 +56,8 @@ SOURCES = [{"id": "mic", "name": "Built-in mic", "kind": "mic"},
 def make(threaded=False):
     out, caps, clock = [], {}, FakeClock()
 
-    def factory(source, on_buffer, on_error):
-        caps[source["id"]] = FakeCapture(source, on_buffer, on_error)
+    def factory(source, mode, on_buffer, on_level, on_error):
+        caps[source["id"]] = FakeCapture(source, mode, on_buffer, on_level, on_error)
         return caps[source["id"]]
 
     return Listener(factory, out.append, now_fn=clock, threaded=threaded), out, caps, clock
@@ -66,16 +68,42 @@ def test_only_the_active_source_is_captured_without_previews():
     li.set_sources(SOURCES)
     assert out[0] == {"type": "sources", "sources": SOURCES}
     li.configure("out", scan=False)
-    assert set(caps) == {"out"}
+    assert set(caps) == {"out"} and caps["out"].mode == "track"
 
 
-def test_previews_capture_every_source_and_stop_again():
+def test_previews_meter_every_other_source_and_stop_again():
     li, _, caps, _ = make()
     li.set_sources(SOURCES)
     li.configure("out", scan=True)
-    assert set(caps) == {"mic", "out", "hdmi"}
+    assert {sid: c.mode for sid, c in caps.items()} == {"mic": "meter", "out": "track", "hdmi": "meter"}
+    assert caps["mic"].on_buffer is None  # no samples into Python for a meter
     li.configure("out", scan=False)
     assert caps["mic"].stopped and caps["hdmi"].stopped and not caps["out"].stopped
+
+
+def test_previews_without_an_active_source():
+    li, _, caps, _ = make()
+    li.set_sources(SOURCES)
+    li.configure(None, scan=True)
+    assert {c.mode for c in caps.values()} == {"meter"}
+
+
+def test_choosing_another_source_swaps_meter_and_tracker():
+    li, _, caps, _ = make()
+    li.set_sources(SOURCES)
+    li.configure("out", scan=True)
+    old_out, old_mic = caps["out"], caps["mic"]
+    li.configure("mic", scan=True)
+    assert old_out.stopped and old_mic.stopped
+    assert caps["mic"].mode == "track" and caps["out"].mode == "meter"
+
+
+def test_levels_are_reported_per_channel():
+    li, out, caps, _ = make()
+    li.set_sources(SOURCES)
+    li.configure("out", scan=True)
+    caps["hdmi"].on_level([-12.34, float("-inf")], [-6.0, -700.0])
+    assert out[-1] == {"type": "level", "source": "hdmi", "rms_db": [-12.3, -100.0], "peak_db": [-6.0, -100.0]}
 
 
 def test_a_source_that_goes_away_is_stopped_and_comes_back():
@@ -90,6 +118,48 @@ def test_a_source_that_goes_away_is_stopped_and_comes_back():
     assert sum(m["type"] == "sources" for m in out) == 3
 
 
+def test_a_failed_capture_is_retried():
+    li, out, caps, clock = make()
+    li.set_sources(SOURCES)
+    li.configure("out", scan=True)
+    first = caps["hdmi"]
+    first.on_error("Internal data stream error.")
+    assert out[-1] == {"type": "error", "source": "hdmi", "message": "Internal data stream error."}
+    li.check_load()
+    assert caps["hdmi"] is first  # not at once: a broken device would spin
+    clock.t += engine.RETRY_S
+    li.check_load()
+    assert first.stopped and caps["hdmi"] is not first and caps["hdmi"].mode == "meter"
+
+
+def test_a_capture_that_cannot_start_is_retried():
+    out, clock, calls = [], FakeClock(), []
+
+    def factory(source, mode, on_buffer, on_level, on_error):
+        calls.append(source["id"])
+        if len(calls) == 1:
+            raise RuntimeError("cannot capture from Speakers")
+        return FakeCapture(source, mode, on_buffer, on_level, on_error)
+
+    li = Listener(factory, out.append, now_fn=clock, threaded=False)
+    li.set_sources(SOURCES[1:2])
+    li.configure("out", scan=False)
+    assert out[-1]["type"] == "error"
+    clock.t += engine.RETRY_S
+    li.check_load()
+    assert calls == ["out", "out"] and li._running["out"].analyzer is not None
+
+
+def test_a_new_tempo_range_restarts_the_tracker():
+    li, _, caps, _ = make()
+    li.set_sources(SOURCES)
+    li.configure("out", scan=False)
+    first = caps["out"]
+    li.configure("out", scan=False, min_bpm=100, max_bpm=200)
+    assert first.stopped and caps["out"] is not first
+    assert li._running["out"].analyzer.tracker.min_bpm == 100
+
+
 def test_estimates_of_the_active_source_lock_on_the_beat():
     li, out, caps, clock = make()
     li.set_sources(SOURCES)
@@ -98,9 +168,8 @@ def test_estimates_of_the_active_source_lock_on_the_beat():
     t0 = clock.t
     play(caps["out"], y, clock)
     est = [m for m in out if m["type"] == "estimate"]
-    assert all(m["active"] and m["source"] == "out" for m in est)
-    gaps = np.diff([m["t"] for m in est])
-    assert np.median(gaps) == pytest.approx(engine.ACTIVE_EVERY_S, abs=0.021)
+    assert all(m["source"] == "out" for m in est)
+    assert np.median(np.diff([m["t"] for m in est])) == pytest.approx(engine.ESTIMATE_EVERY_S, abs=0.021)
     last = est[-1]
     assert last["locked"] and last["bpm"] == pytest.approx(126, abs=0.5)
     # the model puts a beat where the music has one, on the monotonic clock
@@ -110,30 +179,19 @@ def test_estimates_of_the_active_source_lock_on_the_beat():
     json.dumps(out)  # plain json, no numpy types: a message that cannot be sent once stopped a worker for good
 
 
-def test_previews_report_less_often():
-    li, out, caps, clock = make()
-    li.set_sources(SOURCES)
-    li.configure("out", scan=True)
-    y, _ = audio_48k(beats=8)
-    play(caps["mic"], y, clock)
-    est = [m for m in out if m["type"] == "estimate" and m["source"] == "mic"]
-    assert not any(m["active"] for m in est)
-    assert np.median(np.diff([m["t"] for m in est])) == pytest.approx(engine.PREVIEW_EVERY_S, abs=0.021)
-
-
 def test_silence_is_never_locked():
     li, out, caps, clock = make()
     li.set_sources(SOURCES)
     li.configure("mic", scan=False)
     play(caps["mic"], np.zeros(10 * SR, dtype=np.float32), clock)
     est = [m for m in out if m["type"] == "estimate"]
-    assert not any(m["locked"] for m in est) and est[-1]["level_db"] < engine.SILENT_DB
+    assert est and not any(m["locked"] for m in est)
 
 
 def test_health_reports_lost_audio_and_age():
     out, clock = [], FakeClock()
-    cap = FakeCapture({}, None, None)
-    an = SourceAnalyzer("out", True, out.append, now_fn=clock, filled_fn=cap.filled_samples)
+    cap = FakeCapture({}, "track", None, None, None)
+    an = SourceAnalyzer("out", out.append, now_fn=clock, filled_fn=cap.filled_samples)
     y, _ = audio_48k(beats=12)
     for i in range(0, len(y) - BLOCK + 1, BLOCK):
         clock.t = 1000.0 + (i + BLOCK) / SR + 0.006
@@ -145,14 +203,17 @@ def test_health_reports_lost_audio_and_age():
     assert h[-1]["ok"] and 0 <= h[-1]["age_ms"] < 10
 
 
-def test_previews_pause_when_the_analysis_is_too_slow():
+def test_previews_pause_when_the_tracking_falls_behind():
     li, out, caps, clock = make()
     li.set_sources(SOURCES)
     li.configure("out", scan=True)
-    li._running["hdmi"].analyzer.age = 0.4  # its audio is analysed 400 ms late: the analysis cannot keep up
+    li._running["out"].analyzer.age = 0.4  # its audio is analysed 400 ms late
     li.check_load()
     assert out[-1] == {"type": "load", "load": 0.0, "throttled": True}
     assert caps["mic"].stopped and not caps["out"].stopped
+    li.check_load()
+    assert out[-1]["throttled"] is True  # nothing new until the retry
+    li._running["out"].analyzer.age = 0.01  # caught up
     clock.t += engine.THROTTLE_RETRY_S
     li.check_load()
     assert out[-1]["throttled"] is False and not li._running["mic"].capture.stopped
@@ -162,8 +223,7 @@ def test_previews_pause_on_load_as_a_backstop():
     li, out, _, _ = make()
     li.set_sources(SOURCES)
     li.configure("out", scan=True)
-    for r in li._running.values():
-        r.analyzer.rtf = 0.35  # three sources: 1.05 cores
+    li._running["out"].analyzer.rtf = 1.05
     li.check_load()
     assert out[-1] == {"type": "load", "load": 1.05, "throttled": True}
 
@@ -175,8 +235,8 @@ def test_threaded_workers_process_in_order():
     y, _ = audio_48k(beats=8)
     play(caps["out"], y, clock)
     li.close()
-    li_thread = [t for t in __import__("threading").enumerate() if t.name == "listen out"]
-    for t in li_thread:
-        t.join(timeout=5)
+    for t in threading.enumerate():
+        if t.name == "listen out":
+            t.join(timeout=5)
     assert any(m["type"] == "estimate" for m in out)
     assert not [m for m in out if m["type"] == "error"]

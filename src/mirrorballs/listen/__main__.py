@@ -5,8 +5,9 @@ renderer's frame loop for the GIL, and a broken audio stack cannot take the show
     mirrorballs-listen --watch [SUBSTR...]  # every (matching) source, a line per second: tempo, confidence, health
     mirrorballs-listen                      # serve: JSON lines, commands on stdin, messages on stdout
 
-Serving, stdin takes ``{"cmd": "configure", "active": <source id or null>, "scan": <bool>}`` and ``{"cmd": "quit"}``;
-end of input (the renderer went away) quits too. stdout carries the messages described in ``engine``.
+Serving, stdin takes ``{"cmd": "configure", "active": <source id or null>, "scan": <bool>, "min_bpm", "max_bpm"}``
+(the active source is tracked, with ``scan`` every other one is metered) and ``{"cmd": "quit"}``; end of input (the
+renderer went away) quits too. stdout carries the messages described in ``engine``.
 """
 
 from __future__ import annotations
@@ -44,7 +45,8 @@ def _serve() -> int:
         try:
             msg = json.loads(line)
             if msg.get("cmd") == "configure":
-                listener.configure(msg.get("active"), bool(msg.get("scan")))
+                listener.configure(msg.get("active"), bool(msg.get("scan")), float(msg.get("min_bpm", 70.0)),
+                                   float(msg.get("max_bpm", 180.0)))
             elif msg.get("cmd") == "quit":
                 loop.quit()
             else:
@@ -76,7 +78,7 @@ def _watch(only: list[str]) -> int:
     lock = threading.Lock()
 
     def emit(msg: dict[str, Any]) -> None:
-        if msg["type"] in ("estimate", "health"):
+        if msg["type"] in ("estimate", "health", "level"):
             with lock:
                 latest.setdefault(msg["source"], {})[msg["type"]] = msg
         elif msg["type"] != "sources":
@@ -89,18 +91,21 @@ def _watch(only: list[str]) -> int:
         print("no matching source", file=sys.stderr)
         return 1
     listener.set_sources(sources)
-    listener.configure(sources[0]["id"], scan=True)
+    listener.configure(sources[0]["id"], scan=True)  # the first one is tracked, the others metered
     names = {s["id"]: s["name"] for s in sources}
 
     def show() -> bool:
         with lock:
             rows = dict(latest)
-        print(f"{'source':40} {'BPM':>7} {'conf':>5} {'lock':>4} {'dBFS':>6} {'rtf':>6} {'age ms':>6} {'gap ms':>6} ok")
+        print(f"{'source':36} {'level (rms per channel)':24} {'BPM':>7} {'conf':>5} {'lock':>4} {'rtf':>6} "
+              f"{'age ms':>6} {'gap ms':>6} ok")
         for sid, m in rows.items():
-            e, h = m.get("estimate", {}), m.get("health", {})
-            print(f"{names.get(sid, sid)[:40]:40} {e.get('bpm', 0):7.2f} {e.get('confidence', 0):5.2f} "
-                  f"{'yes' if e.get('locked') else 'no':>4} {e.get('level_db', -99):6.1f} {h.get('rtf', 0):6.4f} "
-                  f"{h.get('age_ms', 0):6.1f} {h.get('gap_ms', 0):6.1f} {'yes' if h.get('ok') else 'NO'}")
+            e, h, lv = m.get("estimate"), m.get("health", {}), m.get("level", {})
+            meters = " ".join(_meter(db) for db in lv.get("rms_db", []))
+            track = (f"{e['bpm']:7.2f} {e['confidence']:5.2f} {'yes' if e['locked'] else 'no':>4} {h.get('rtf', 0):6.4f} "
+                     f"{h.get('age_ms', 0):6.1f} {h.get('gap_ms', 0):6.1f} {'yes' if h.get('ok') else 'NO'}"
+                     if e else "      (metered only)")
+            print(f"{names.get(sid, sid)[:36]:36} {meters:24} {track}")
         print(flush=True)
         listener.check_load()
         return True
@@ -113,6 +118,12 @@ def _watch(only: list[str]) -> int:
     listener.close()
     watch.stop()
     return 0
+
+
+def _meter(db: float, width: int = 10) -> str:
+    """-60..0 dBFS as a bar."""
+    n = max(0, min(width, round((db + 60) / 60 * width)))
+    return "#" * n + "." * (width - n)
 
 
 def _plain(x: Any) -> Any:
