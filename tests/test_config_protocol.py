@@ -156,3 +156,13 @@ def test_a_config_with_the_removed_safety_section_still_loads(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text("safety: {flash_limit: true, max_flashes_per_s: 3}\nclock: {bpm: 100}\n")
     assert load_config(p).clock.bpm == 100
+
+
+def test_accent_colours_are_checked_and_an_old_indicator_key_still_loads(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("ui: {beat_indicator: false}\naccent: {color: '#ff8800', colors: [{name: Warm, color: '#ff8800'}]}\n")
+    c = load_config(p)
+    assert c.accent.rgb() == pytest.approx((1.0, 0x88 / 255, 0.0)) and c.accent.colors[0].name == "Warm"
+    p.write_text("accent: {colors: [{name: Bad, color: 'orange'}]}\n")
+    with pytest.raises(ConfigError, match="accent.colors.0.color"):
+        load_config(p)

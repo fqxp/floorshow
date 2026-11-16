@@ -283,7 +283,7 @@ def test_scrolling_the_bpm_chip_sets_the_internal_tempo_only(win):
     w, fake = win
     w.set_connection(True)
     w.apply_state(st())
-    assert "Scroll" in w.source_chip.get_tooltip_text()
+    assert "Scroll" in w.source_box.get_tooltip_text()
     assert w._on_bpm_scroll(None, 0, -1.0)  # wheel up: one BPM faster
     assert fake.sent[-1] == ("bpm.set", {"bpm": 121.0}) and w.source_chip.get_text() == "Internal · 121 BPM"
     w.apply_state(st())  # a stale state does not undo it
@@ -297,20 +297,89 @@ def test_scrolling_the_bpm_chip_sets_the_internal_tempo_only(win):
     w.apply_state(st(clock=dict(st()["clock"], source="midi", bpm=124.0)))
     w._bpm_hold = 0.0
     assert not w._on_bpm_scroll(None, 0, -1.0) and fake.sent == []
-    assert "MIDI" in w.source_chip.get_tooltip_text()
+    assert "MIDI" in w.source_box.get_tooltip_text()
 
 
-def test_beat_indicator_switch_is_on_by_default_and_saved(win):
+def test_the_beat_dot_sits_in_the_clock_chip(win):
     w, _ = win
-    assert w.indicator_sw.get_active() and w.beat_tile.get_opacity() == 1.0 and w.pips_box.get_opacity() == 1.0
-    before = w.clock_panel.get_width(), w.clock_panel.get_height()
-    w.indicator_sw.set_active(False)
-    pump(100)
-    assert w.beat_tile.get_opacity() == 0.0 and w.pips_box.get_opacity() == 0.0
-    assert (w.clock_panel.get_width(), w.clock_panel.get_height()) == before  # the layout stays put
-    assert w.store.load().ui.beat_indicator is False
-    w.indicator_sw.set_active(True)
-    assert w.store.load().ui.beat_indicator is True
+    assert w.beat_tile.get_parent() is w.source_box and w.source_chip.get_parent() is w.source_box
+    assert w.beat_tile.get_height() <= w.source_chip.get_height() + 2  # about the text's size, not a tile
+
+
+def cards(w):
+    out = []
+    c = w.grid.get_first_child()
+    while c:
+        out.append(c.get_child())
+        c = c.get_next_sibling()
+    return out
+
+
+def test_tag_filter_all_and_tags(win):
+    w, _ = win
+    w.set_connection(True)
+    w.apply_state(st())
+    assert list(w._tag_buttons) == [None, "x", "y"] and w._tag_buttons[None].get_active()
+    w._tag_buttons["x"].set_active(True)
+    assert not w._tag_buttons[None].get_active() and len(cards(w)) == 1 and "Alpha" in texts(w.grid)
+    assert w.visible_ids() == ["alpha"]
+    w._tag_buttons["x"].set_active(False)  # the last tag off: back to All
+    assert w._tag_buttons[None].get_active() and len(cards(w)) == 2
+    w._tag_buttons["y"].set_active(True)
+    w._tag_buttons[None].set_active(True)
+    assert not w._tag_buttons["y"].get_active() and len(cards(w)) == 2
+    w._tag_buttons[None].set_active(False)  # All cannot be switched off by itself
+    assert w._tag_buttons[None].get_active()
+
+
+def test_only_accented_shows_the_scenes_that_use_the_accent(win, tmp_path):
+    w, _ = win
+    (tmp_path / "scenes" / "gamma.yaml").write_text("schema: 1\nname: Gamma\nlayers:\n  - {type: fill, color: accent}\n")
+    w.library.refresh()
+    w.set_connection(True)
+    w.apply_state(st())
+    w.refresh()
+    w.accented_check.set_active(True)
+    assert w.visible_ids() == ["gamma"] and "Gamma" in texts(w.grid) and "Alpha" not in texts(w.grid)
+
+
+def test_accent_selector_sends_and_saves(win):
+    w, fake = win
+    w.store.update({"accent": {"colors": [{"name": "Warm", "color": "#ff8800"}, {"name": "Ice", "color": "#88ccff"}]}})
+    w.accent_colors_changed()
+    w.set_connection(True)
+    w.apply_state(st(accent=[1.0, 1.0, 1.0]))
+    model = w.accent_dd.get_model()
+    assert [model.get_string(i) for i in range(model.get_n_items())] == ["Warm", "Ice", "Custom"]
+    w.accent_dd.set_selected(1)
+    pump(50)
+    assert fake.sent[-1] == ("accent.set", {"color": [0.5333, 0.8, 1.0]}) and w.store.load().accent.color == "#88ccff"
+    w.apply_state(st(accent=[0.5333, 0.8, 1.0]))
+    assert w.accent_dd.get_model().get_n_items() == 2 and w.accent_dd.get_selected() == 1  # a named one: no "Custom"
+    rgba = Gdk.RGBA()
+    rgba.parse("#102030")
+    w.accent_btn.set_rgba(rgba)  # the free colour
+    pump(50)
+    assert fake.sent[-1][0] == "accent.set" and w.store.load().accent.color == "#102030"
+    assert w.accent_dd.get_selected() == 2  # "Custom"
+
+
+def test_accent_colors_dialog_adds_renames_and_deletes(win):
+    w, _ = win
+    w.open_accent_colors()
+    d = w.accent_dialog
+    d.add_color()
+    d.add_color()
+    assert [c.name for c in w.store.load().accent.colors] == ["Color 1", "Color 2"]
+    d._rename(d.colors[0], "Warm")
+    d._save_now()
+    assert w.store.load().accent.colors[0].name == "Warm"
+    d.delete_color(d.colors[1])
+    assert [c.name for c in w.store.load().accent.colors] == ["Warm"]
+    model = w.accent_dd.get_model()
+    assert model.get_string(0) == "Warm"
+    d.close()
+    assert w.accent_dialog is None
 
 
 def test_countdown_bar_shrinks_towards_the_next_automatic_change(win):
@@ -393,7 +462,7 @@ def test_banners_and_calibration_lockout(win):
     w.set_connection(True)
     w.apply_state(st(clock=dict(st()["clock"], source="midi", locked=False, bpm=118.0, port="X", status="waiting for clock")))
     assert any("MIDI clock lost" in t for t in texts(w.banner_box))
-    assert w.source_chip.has_css_class("warn")
+    assert w.source_box.has_css_class("warn")
     w.apply_state(st(calibrating=True))
     assert not w.grid.get_sensitive() and not w.scenes_panel.get_sensitive()
     fake.sent.clear()
@@ -1152,3 +1221,4 @@ def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monk
         client.close()
         win.destroy()
         rig.close()
+

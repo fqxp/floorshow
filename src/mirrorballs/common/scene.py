@@ -182,6 +182,7 @@ class Scene:
     spin_deg: Expr | None
     layers: list[CompiledLayer]
     source: Path | None = None
+    uses_accent: bool = False  # some expression reads ``accent``, so the scene follows the accent colour
     errors: list[str] = field(default_factory=list)  # runtime expression errors seen (for the UI)
 
     def default_params(self) -> dict[str, Any]:
@@ -225,13 +226,14 @@ def make_env(
     trans: float = 1.0,
     tile: float = 4.0,
     row_offset: float | None = None,
+    accent: tuple[float, float, float] = (1.0, 1.0, 1.0),
     params: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Variable environment for :meth:`Scene.evaluate`. ``beats_per_bar`` is the scene's own value
     if it declares one, else the clock's."""
     env: dict[str, Any] = dict(
         beat=beat, phase=phase, bar=beat / beats_per_bar, scene_beat=scene_beat, time=time, bpm=bpm, trans=trans,
-        tile=tile, row_offset=row_offset,
+        tile=tile, row_offset=row_offset, accent=tuple(accent),
     )
     for name, value in (params or {}).items():
         env[f"param.{name}"] = _param_value(value)
@@ -489,6 +491,7 @@ def compile_scene(model: SceneFile, scene_id: str, base_dir: Path, source: Path 
 
     if c.problems:
         raise SceneError(str(source or scene_id), c.problems)
+    exprs = [ex for layer in layers for ex in _layer_exprs(layer)] + ([spin_deg] if spin_deg else [])
     return Scene(
         id=scene_id,
         name=model.name,
@@ -502,6 +505,7 @@ def compile_scene(model: SceneFile, scene_id: str, base_dir: Path, source: Path 
         spin_deg=spin_deg,
         layers=layers,
         source=source,
+        uses_accent=any(ex.uses("accent") for ex in exprs),
     )
 
 

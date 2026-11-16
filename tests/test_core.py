@@ -507,3 +507,16 @@ def test_nothing_smears_while_calibrating_or_on_the_test_pattern(env):
     cmd(c, {"cmd": "testpattern.set", "on": False})
     # the gap did not pile up while it was off: one frame later is one frame's worth of decay
     assert c.frame(100.4).trail_decay == pytest.approx(0.02 ** (0.1 / 0.5), rel=1e-6)
+
+
+def test_the_accent_colour_starts_from_the_config_and_is_set_live(env):
+    tmp, cfg, scenes = env
+    (scenes / "a.yaml").write_text("schema: 1\nname: a\nlayers:\n  - {type: fill, color: accent}\n")
+    c = make(env, "accent: {color: '#ff0000', colors: [{name: Red, color: '#ff0000'}]}\n")
+    assert c.state(100.0)["accent"] == [1.0, 0.0, 0.0]
+    assert c.frame(100.0).incoming.shapes[0].color == (1.0, 0.0, 0.0)
+    assert cmd(c, {"cmd": "accent.set", "color": [0.0, 0.0, 1.0]})["ok"]
+    c.reload(100.0)  # a live control, like the trail: a reload does not undo it
+    assert c.frame(100.1).incoming.shapes[0].color == (0.0, 0.0, 1.0)
+    with pytest.raises(ValueError):
+        P.parse_command({"cmd": "accent.set", "color": [2.0, 0.0, 0.0]})

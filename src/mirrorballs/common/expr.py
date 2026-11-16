@@ -190,9 +190,10 @@ CONSTANTS: dict[str, Value] = {
     "purple": (0.6, 0.2, 1.0),
 }
 
-# Names every evaluation environment must provide. ``row_offset`` is internal (used by the
-# hidden snap_row / snap_edge arguments); it is ``None`` when the rows are uncalibrated.
-CLOCK_VARS = ("beat", "phase", "bar", "scene_beat", "time", "bpm", "trans", "tile")
+# Names every evaluation environment must provide. ``accent`` is the show's accent colour, set from the
+# controller. ``row_offset`` is internal (used by the hidden snap_row / snap_edge arguments); it is
+# ``None`` when the rows are uncalibrated.
+CLOCK_VARS = ("beat", "phase", "bar", "scene_beat", "time", "bpm", "trans", "tile", "accent")
 INTERNAL_VARS = ("row_offset",)
 
 _ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
@@ -337,6 +338,10 @@ class Expr:
             return float(result)
         self.last_error = f"{self.source!r}: result is {type(result).__name__}, not a number"  # e.g. (-8)**0.5
         return 0.0
+
+    def uses(self, name: str) -> bool:
+        """Whether the expression reads the variable ``name``."""
+        return name in self._code.co_names
 
     def __repr__(self) -> str:
         return f"Expr({self.source!r})"

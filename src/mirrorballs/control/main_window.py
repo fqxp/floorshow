@@ -30,6 +30,7 @@ TAP_SETTLE_S = 2.5  # save the tapped tempo this long after the last tap
 BPM_HOLD_S = 0.6  # likewise for a tempo changed with the scroll wheel
 EVERY_HOLD_S = 1.0  # after a click on the every-N-bars stepper, ignore the streamed value until the renderer has applied it
 CLOCK_HOLD_S = 1.5  # likewise for the clock switch: the renderer has to reload the file before it reports the new source
+ACCENT_HOLD_S = 0.6  # likewise for the accent colour
 RIGHT_COLUMN_W = 272
 CONTROLS_MIN_H = 160
 COUNTDOWN_W = 120
@@ -56,15 +57,13 @@ def param_title(text: str) -> Gtk.Label:
 
 
 class BeatTile(Gtk.DrawingArea):
-    """68x68 tile that is red on the beat and fades into its ground until the next one. Red is used
-    for nothing else in the app."""
+    """Small square, the size of the clock chip's text, that is red on the beat and fades into its ground
+    until the next one. Red is used for nothing else in the app. Its size is in the stylesheet (em)."""
 
     MAX_FPS = 30  # repaints are costly (the whole window is re-rendered) and 30 per second fades smoothly enough
 
     def __init__(self) -> None:
         super().__init__()
-        self.set_content_width(68)
-        self.set_content_height(68)
         self.set_valign(Gtk.Align.CENTER)
         self.add_css_class("beat-tile")
         self.intensity = 0.0
@@ -85,7 +84,7 @@ class BeatTile(Gtk.DrawingArea):
     def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
         pal = tokens.palette(self.dark)
         r, g, b = tokens.mix(pal["well"], pal["beat"], self.intensity)
-        rad = 14
+        rad = min(w, h) / 4
         cr.new_sub_path()
         cr.arc(w - rad, rad, rad, -math.pi / 2, 0)
         cr.arc(w - rad, h - rad, rad, 0, math.pi / 2)
@@ -152,6 +151,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._pips: list[Gtk.Label] = []
         self._pip_current = -1
         self._cards_key: tuple | None = None
+        self._tags_key: tuple | None = None
+        self._tag_filter: frozenset[str] = frozenset()  # empty = All
+        self._tag_buttons: dict[str | None, Gtk.ToggleButton] = {}  # None = All
+        self._accent_key: tuple | None = None
+        self._accent_hold = 0.0
+        self._accent_target = "#ffffff"
         self._params_key: tuple | None = None
         self._banner_key: tuple | None = None
         self._param_widgets: dict[str, Any] = {}
@@ -173,6 +178,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._escapes: list[float] = []  # recent Escape presses (the panic blackout)
         self.preferences_dialog: Any = None
         self.scenes_dialog: Any = None
+        self.accent_dialog: Any = None
         self.calibration_window: Any = None
 
         cfg = store.load()
@@ -202,6 +208,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.set_title_widget(label("Mirrorballs", "title-label"))
         menu = Gio.Menu()
         menu.append("Scenes…", "win.scenes")
+        menu.append("Accent colors…", "win.accent-colors")
         menu.append("Calibration…", "win.calibration")
         menu.append("Preferences…", "win.preferences")
         menu.append("Quit renderer", "win.quit-renderer")
@@ -252,20 +259,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.run_spinner = Gtk.Spinner(visible=False)
         self.run_spinner.set_size_request(26, 26)
         self.run_label = label("Start", "big")
-        self.run_kbd = kbd("Space")
+        self.run_kbd = hbox(4, kbd("Ctrl"), kbd("Space"), halign=Gtk.Align.CENTER)
         col = vbox(6, hbox(10, self.run_icon, self.run_spinner, self.run_label, halign=Gtk.Align.CENTER), self.run_kbd,
                    halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         self.run_btn.set_child(col)
         self.run_btn.connect("clicked", lambda *_: self.act_toggle_run())
 
         self.beat_tile = BeatTile()
-        self.source_chip = label("", "chip", "source")
-        self.source_chip.set_halign(Gtk.Align.START)
+        self.source_chip = label("")
         # A MIDI port name can be long ("VirMIDI 1-0 (raw hw:1,0)"); the chip shrinks instead of the window,
         # never below the width of an internal-clock reading. The full text is in the tooltip.
         self.source_chip.set_ellipsize(Pango.EllipsizeMode.END)
         self.source_chip.set_width_chars(20)  # "Internal · 120 BPM" always fits; MIDI readings truncate
         self.source_chip.set_max_width_chars(40)
+        self.source_box = hbox(6, self.beat_tile, self.source_chip, halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
+        self.source_box.add_css_class("chip")
+        self.source_box.add_css_class("source")
         for n in range(1, 5):
             p = label(str(n), "pip", xalign=0.5)
             p.set_size_request(26, 26)
@@ -280,21 +289,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.downbeat_btn.connect("clicked", lambda *_: self.act_downbeat())
         scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         scroll.connect("scroll", self._on_bpm_scroll)
-        self.source_chip.add_controller(scroll)
-        self.indicator_sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.cfg.ui.beat_indicator)
-        self.indicator_sw.add_css_class("mb-switch")
-        self.indicator_sw.set_tooltip_text("Show the beat and bar indicator")
-        self.indicator_sw.connect("notify::active", self._on_indicator_toggled)
-        self.indicator_row = hbox(8, label("Indicator", "secondary"), self.indicator_sw)
-        self._apply_indicator()
+        self.source_box.add_controller(scroll)
         # The clock can change mid-show (a DJ program is started, or stops), so the switch belongs here and
         # not only in the configuration. Both write the same clock.source.
         self.clock_seg = Segmented([("internal", "Internal"), ("midi", "MIDI")], self.cfg.clock.source,
                                    self.set_clock_source)
-        strip_right = vbox(10, hbox(12, self.source_chip, Gtk.Box(hexpand=True), self.clock_seg, self.indicator_row),
-                           hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn),
-                           hexpand=True, valign=Gtk.Align.CENTER)
-        self.clock_panel = hbox(16, self.beat_tile, strip_right, hexpand=True)
+        strip = vbox(10, hbox(12, self.source_box, Gtk.Box(hexpand=True), self.clock_seg),
+                     hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn),
+                     hexpand=True, valign=Gtk.Align.CENTER)
+        self.clock_panel = hbox(16, strip, hexpand=True)
         self.clock_panel.add_css_class("panel")
         self.clock_panel.set_margin_top(0)
         return hbox(12, self.run_btn, self.clock_panel)
@@ -344,6 +347,15 @@ class MainWindow(Adw.ApplicationWindow):
         for w in (seg, stepper, self.trans_dd, self.len_dd):
             options.append(w)
 
+        # The tag filter only changes which cards are shown (and what Prev / Next step through); the
+        # director's Random and Sequence still pick from every scene.
+        self.tags_wrap = Adw.WrapBox(child_spacing=6, line_spacing=6, hexpand=True)
+        self.accented_check = Gtk.CheckButton(label="Only accented", valign=Gtk.Align.CENTER)
+        self.accented_check.add_css_class("mb-check")
+        self.accented_check.set_tooltip_text("Show only scenes that use the accent color")
+        self.accented_check.connect("toggled", lambda *_: self._refilter())
+        tag_row = hbox(8, self.tags_wrap, self.accented_check)
+
         self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
                                 max_children_per_line=4, column_spacing=8, row_spacing=8, valign=Gtk.Align.START)
         self.grid.add_css_class("scene-grid")
@@ -360,10 +372,13 @@ class MainWindow(Adw.ApplicationWindow):
             "Add a scene to get started. Scenes are small files you can edit in any text editor.",
             [("Add scene…", self.open_scenes), ("Reveal folder", self.act_reveal_folder)],
         )
+        no_match = vbox(10, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, vexpand=True)
+        self._fill_empty(no_match, "edit-find-symbolic", "No matching scenes", "No scene has these tags.", small=True)
         self.scene_stack = Gtk.Stack(vexpand=True)
         self.scene_stack.add_named(scroller, "grid")
         self.scene_stack.add_named(self.empty_scenes, "empty")
-        panel = vbox(10, head, options, self.scene_stack, vexpand=True)
+        self.scene_stack.add_named(no_match, "no-match")
+        panel = vbox(10, head, options, tag_row, self.scene_stack, vexpand=True)
         panel.add_css_class("panel")
         self.scenes_panel = panel
         return panel
@@ -404,6 +419,15 @@ class MainWindow(Adw.ApplicationWindow):
         return panel
 
     def _build_master_panel(self) -> Gtk.Widget:
+        self.accent_dd = Gtk.DropDown.new_from_strings([])
+        self.accent_dd.add_css_class("mb-dd")
+        self.accent_dd.set_hexpand(True)
+        self.accent_dd.set_tooltip_text("Scenes that use the accent color follow it. Name colors in Accent colors…")
+        self.accent_dd.connect("notify::selected", self._on_accent_picked)
+        self.accent_btn = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False), valign=Gtk.Align.CENTER)
+        self.accent_btn.add_css_class("accent-swatch")
+        self.accent_btn.set_tooltip_text("Any accent color")
+        self.accent_btn.connect("notify::rgba", self._on_accent_free)
         self.brightness_label = label("85 %", "secondary")
         self.brightness = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
         self.brightness.set_draw_value(False)
@@ -425,7 +449,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.trail.set_value(min(TRAIL_MAX_S, self.cfg.trail.seconds) * 100)  # what the renderer starts with
         self._show_trail()
         self.trail.connect("value-changed", self._on_trail_changed)
-        panel = vbox(10, label("Master", "panel-title"),
+        panel = vbox(10, label("Main", "panel-title"),
+                     vbox(4, label("Accent"), hbox(8, self.accent_dd, self.accent_btn)),
                      vbox(4, hbox(0, label("Brightness", hexpand=True), self.brightness_label), self.brightness),
                      vbox(4, hbox(0, label("Trail", hexpand=True), self.trail_label), self.trail),
                      self.blackout_btn)
@@ -493,6 +518,7 @@ class MainWindow(Adw.ApplicationWindow):
         for name, fn in (
             ("preferences", lambda *_: self.open_preferences()),
             ("scenes", lambda *_: self.open_scenes()),
+            ("accent-colors", lambda *_: self.open_accent_colors()),
             ("calibration", lambda *_: self.open_calibration()),
             ("quit", lambda *_: self.close()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
@@ -540,22 +566,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.starting = True
         self._start_deadline = time.monotonic() + START_TIMEOUT_S
         self.refresh()
-
-    def _on_indicator_toggled(self, sw: Gtk.Switch, *_a: Any) -> None:
-        self._apply_indicator()
-        if self._ui_guard:
-            return
-        try:
-            self.store.update({"ui": {"beat_indicator": sw.get_active()}})
-            self.cfg = self.store.load()
-        except Exception as e:  # noqa: BLE001
-            self.toast(f"Could not save the setting: {e}")
-
-    def _apply_indicator(self) -> None:
-        # Invisible, not removed: the panel must keep its size.
-        on = self.indicator_sw.get_active()
-        self.beat_tile.set_opacity(1.0 if on else 0.0)
-        self.pips_box.set_opacity(1.0 if on else 0.0)
 
     def _on_bpm_scroll(self, _ctl: Gtk.EventControllerScroll, _dx: float, dy: float) -> bool:
         """Scroll up = faster, one BPM per wheel step. Only the internal clock has a tempo to set."""
@@ -648,7 +658,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.send("scene.set", scene=sid, transition=self.transition_payload())
 
     def act_step(self, delta: int) -> None:
-        ids = self.library.ids()
+        ids = self.visible_ids()
         if not ids or not self.connected:
             return
         cur = (self.state or {}).get("scene")
@@ -698,6 +708,13 @@ class MainWindow(Adw.ApplicationWindow):
         if self.scenes_dialog is None:
             self.scenes_dialog = ScenesDialog(self)
         self.scenes_dialog.present()
+
+    def open_accent_colors(self) -> None:
+        from .accent_dialog import AccentDialog
+
+        if self.accent_dialog is None:
+            self.accent_dialog = AccentDialog(self)
+        self.accent_dialog.present()
 
     def open_calibration(self) -> None:
         from .calibration import CalibrationWindow
@@ -770,6 +787,75 @@ class MainWindow(Adw.ApplicationWindow):
             self.send("reload")
         except Exception as e:  # noqa: BLE001
             self.toast(f"Could not save the transition: {e}")
+
+    def accent_hex(self) -> str:
+        """The accent colour as the window shows it: just picked, else the renderer's, else the saved one."""
+        st = self.state if self.connected else None
+        if time.monotonic() < self._accent_hold:
+            return self._accent_target
+        if st and st.get("accent"):
+            return vm.rgb_to_hex(st["accent"])
+        return self.cfg.accent.color.lower()
+
+    def set_accent(self, color: str) -> None:
+        """Make ``color`` ("#rrggbb") the accent: live in the renderer, and saved as what it starts with."""
+        color = color.lower()
+        self._accent_target, self._accent_hold = color, time.monotonic() + ACCENT_HOLD_S
+        self.send("accent.set", color=[round(c, 4) for c in tokens.hex_to_rgb(color)])
+        try:
+            self.store.update({"accent": {"color": color}})
+            self.cfg = self.store.load()
+        except Exception as e:  # noqa: BLE001
+            self.toast(f"Could not save the accent color: {e}")
+        # Not now: this runs inside the dropdown's own notify::selected, and swapping its model there
+        # (a free colour's "Custom" entry comes and goes) frees what the dropdown is still using.
+        GLib.idle_add(self._idle_refresh_accent)
+
+    def _idle_refresh_accent(self) -> bool:
+        self._ui_guard = True
+        try:
+            self._refresh_accent()
+        finally:
+            self._ui_guard = False
+        return False
+
+    def accent_colors_changed(self) -> None:
+        """The accent colours dialog saved the list."""
+        self.cfg = self.store.load()
+        self._ui_guard = True
+        try:
+            self._refresh_accent()
+        finally:
+            self._ui_guard = False
+
+    def _on_accent_picked(self, dd: Gtk.DropDown, *_a: Any) -> None:
+        if self._ui_guard:
+            return
+        colors = self.cfg.accent.colors
+        i = dd.get_selected()
+        if i < len(colors):
+            self.set_accent(colors[i].color)
+
+    def _on_accent_free(self, btn: Gtk.ColorDialogButton, *_a: Any) -> None:
+        if self._ui_guard:
+            return
+        c = btn.get_rgba()
+        self.set_accent(vm.rgb_to_hex((c.red, c.green, c.blue)))
+
+    def _refresh_accent(self) -> None:
+        named = [(c.name, c.color) for c in self.cfg.accent.colors]
+        current = self.accent_hex()
+        idx = vm.accent_index(named, tokens.hex_to_rgb(current))
+        key = (tuple(named), idx is None)
+        if key != self._accent_key:
+            self._accent_key = key
+            items = [n or "Unnamed" for n, _ in named] + (["Custom"] if idx is None else [])
+            self.accent_dd.set_model(Gtk.StringList.new(items))
+        self.accent_dd.set_selected(len(named) if idx is None else idx)
+        rgba = Gdk.RGBA()
+        rgba.parse(current)
+        if not rgba.equal(self.accent_btn.get_rgba()):
+            self.accent_btn.set_rgba(rgba)
 
     def _on_brightness_changed(self, scale: Gtk.Scale) -> None:
         v = scale.get_value()
@@ -923,10 +1009,10 @@ class MainWindow(Adw.ApplicationWindow):
                                    st.get("midi") if st else None)
         self.source_chip.set_text(text)
         internal = (st["clock"]["source"] == "internal") if st else self.cfg.clock.source == "internal"
-        self.source_chip.set_tooltip_text(
+        self.source_box.set_tooltip_text(
             f"{text}\n" + ("Scroll to change the tempo" if internal else "The tempo follows the MIDI clock"))
         self.tap_btn.set_visible(internal)  # tapping cannot move a clock that another program owns
-        set_classes(self.source_chip, {"warn": warn})
+        set_classes(self.source_box, {"warn": warn})
         set_classes(self.pips_box, {"dim": st is None})
         self._sync_clock_seg()
         if st:
@@ -934,15 +1020,56 @@ class MainWindow(Adw.ApplicationWindow):
             for i, p in enumerate(self._pips):
                 p.set_visible(i < st["clock"]["beats_per_bar"])
 
+    def visible_ids(self) -> list[str]:
+        """The scenes the tag filter lets through, in grid order."""
+        return vm.filter_scenes(self.library.scenes, self.library.ids(), self._tag_filter, self.accented_check.get_active())
+
+    def _refresh_tags(self) -> None:
+        tags = vm.all_tags(self.library.scenes)
+        self._tag_filter = self._tag_filter.intersection(tags)  # a tag no scene has any more is not selected
+        if tuple(tags) != self._tags_key:
+            self._tags_key = tuple(tags)
+            while (c := self.tags_wrap.get_first_child()) is not None:
+                self.tags_wrap.remove(c)
+            self._tag_buttons = {}
+            for tag in (None, *tags):
+                b = Gtk.ToggleButton(label="All" if tag is None else tag, valign=Gtk.Align.CENTER)
+                b.add_css_class("chip-toggle")
+                b.add_css_class("small")
+                b.connect("toggled", lambda _b, tag=tag: self._on_tag_clicked(tag))
+                self._tag_buttons[tag] = b
+                self.tags_wrap.append(b)
+        guard, self._ui_guard = self._ui_guard, True
+        try:
+            for tag, b in self._tag_buttons.items():
+                b.set_active(not self._tag_filter if tag is None else tag in self._tag_filter)
+        finally:
+            self._ui_guard = guard
+
+    def _on_tag_clicked(self, tag: str | None) -> None:
+        if self._ui_guard:
+            return
+        self._tag_filter = vm.toggle_tag(self._tag_filter, tag)
+        self._refilter()
+
+    def _refilter(self) -> None:
+        self._ui_guard = True  # the refresh sets the mode buttons, which must not send anything
+        try:
+            self._refresh_scenes(self.state if self.connected else None)
+        finally:
+            self._ui_guard = False
+
     def _refresh_scenes(self, st: dict[str, Any] | None) -> None:
-        ids = self.library.ids()
+        all_ids = self.library.ids()
+        self._refresh_tags()
+        ids = self.visible_ids()
         current = st.get("scene") if st else None
         mode = st.get("mode") if st else "manual"
         key = (tuple(ids), current, self.connected)
         if key != self._cards_key:
             self._cards_key = key
-            self._rebuild_cards(ids, current)
-        self.scene_stack.set_visible_child_name("grid" if ids else "empty")
+            self._rebuild_cards(ids, current, all_ids)
+        self.scene_stack.set_visible_child_name("grid" if ids else "no-match" if all_ids else "empty")
         self.manual_btn.set_active(mode not in ("random", "sequence"))
         self.random_btn.set_active(mode == "random")
         self.sequence_btn.set_active(mode == "sequence")
@@ -952,10 +1079,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.trans_dd.set_selected(self.trans_idx)
         self.len_dd.set_selected(self.len_idx)
 
-    def _rebuild_cards(self, ids: list[str], current: str | None) -> None:
+    def _rebuild_cards(self, ids: list[str], current: str | None, all_ids: list[str]) -> None:
         while (c := self.grid.get_first_child()) is not None:
             self.grid.remove(c)
-        keys = vm.hotkeys(ids, self.cfg.bindings.keys)
+        keys = vm.hotkeys(all_ids, self.cfg.bindings.keys)  # a scene keeps its key while the filter hides others
         for sid in ids:
             sc = self.library.scenes[sid]
             live = sid == current
@@ -1070,6 +1197,7 @@ class MainWindow(Adw.ApplicationWindow):
                 w.set_rgba(rgba)
 
     def _refresh_master(self, st: dict[str, Any] | None) -> None:
+        self._refresh_accent()
         if st is None:
             return
         pct = st["master"] * 100
@@ -1111,7 +1239,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_tick(self, _w: Gtk.Widget, _clock: Any) -> bool:
         st = self.state if self.connected else None
-        if st is None or not self.indicator_sw.get_active():
+        if st is None:
             self.beat_tile.set_intensity(0.0)
             self._set_pip(-1)
         else:
@@ -1149,7 +1277,7 @@ class MainWindow(Adw.ApplicationWindow):
     def show_shortcuts(self) -> None:
         # The calibration keys are not listed: that window shows every one of them on its own buttons.
         rows = [
-            ("Main window", [("Start / Stop", ["Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]),
+            ("Main window", [("Start / Stop", ["Ctrl", "Space"]), ("Tap tempo", ["T"]), ("Downbeat", ["D"]),
                              ("Blackout", ["Ctrl", "B"]), ("Blackout in a panic", ["Esc"] * vm.PANIC_ESCAPES),
                              ("Internal / MIDI clock", ["C"]),
                              ("Scene 1–10", ["1", "…", "9", "0"]), ("Previous / next scene", ["[", "]"]),

@@ -114,14 +114,14 @@ def test_the_panic_blackout_needs_four_escapes_in_a_row():
 def test_key_to_action_matches_the_shortcut_sheet():
     from mirrorballs.control.viewmodel import key_to_action as k
 
-    assert k("space") == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("b", ctrl=True) == ("blackout", None)
+    assert k("space", ctrl=True) == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("b", ctrl=True) == ("blackout", None)
     assert k("m") == ("mode", "manual") and k("r") == ("mode", "random") and k("s") == ("mode", "sequence")
     assert k("c") == ("clock-source", None)
     assert k("bracketleft") == ("step", -1) and k("bracketright") == ("step", 1)
     assert k("3") == ("scene-key", "3") and k("9") == ("scene-key", "9") and k("0") == ("scene-key", "0")
     assert k("Up", ctrl=True) == ("brightness", 5) and k("Down", ctrl=True) == ("brightness", -5)
     assert k("comma", ctrl=True) == ("preferences", None) and k("question", ctrl=True) == ("shortcuts", None)
-    assert k("space", ctrl=True) is None and k("x") is None  # no accidental triggers
+    assert k("space") is None and k("x") is None  # no accidental triggers: a bare Space is a focused button's
 
 
 def test_change_progress_shrinks_from_one_to_zero():
@@ -157,3 +157,27 @@ def test_midi_input_status_says_what_is_wrong():
     text, warn = vm.clock_text(clock(locked=False, midi_mode="beats"), midi={"clock": {"wanted": "x", "open": "x"}})
     assert warn and text.startswith("MIDI · waiting for beat notes")
     assert vm.clock_text(clock(), midi={"clock": {"wanted": None, "open": None}}) == ("MIDI · no port selected", True)
+
+
+def test_tag_filter_has_all_and_never_selects_nothing():
+    from types import SimpleNamespace as NS
+
+    scenes = {"a": NS(tags=["warm", "slow"], uses_accent=True), "b": NS(tags=["cold"], uses_accent=False),
+              "c": NS(tags=[], uses_accent=True)}
+    ids = ["a", "b", "c"]
+    assert vm.all_tags(scenes) == ["cold", "slow", "warm"]
+    sel = vm.toggle_tag(frozenset(), "warm")
+    assert sel == {"warm"} and vm.filter_scenes(scenes, ids, sel) == ["a"]
+    sel = vm.toggle_tag(sel, "cold")
+    assert vm.filter_scenes(scenes, ids, sel) == ["a", "b"]  # any of the tags
+    assert vm.toggle_tag(sel, None) == frozenset()  # "All"
+    assert vm.toggle_tag(frozenset({"warm"}), "warm") == frozenset()  # the last one off is "All" again
+    assert vm.filter_scenes(scenes, ids, frozenset()) == ids
+    assert vm.filter_scenes(scenes, ids, frozenset(), only_accented=True) == ["a", "c"]
+
+
+def test_accent_colours_match_by_hex():
+    assert vm.rgb_to_hex((1.0, 0.5333, 0.0)) == "#ff8800"
+    named = [("Warm", "#FF8800"), ("Ice", "#88ccff")]
+    assert vm.accent_index(named, (1.0, 0.5333, 0.0)) == 0
+    assert vm.accent_index(named, (0.1, 0.2, 0.3)) is None

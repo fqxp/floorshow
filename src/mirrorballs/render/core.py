@@ -88,6 +88,7 @@ class Core:
         self.running = True
         self.master = 1.0
         self.trail_s = 0.0  # how long what disappears keeps glowing; 0 = off
+        self.accent: tuple[float, float, float] = (1.0, 1.0, 1.0)  # what scenes read as ``accent``
         self._last_frame: float | None = None  # for the trail's per-frame decay
         self._level = 1.0  # blackout fade level, animated toward 1 (running) or 0 (stopped)
         self._level_time = now
@@ -156,6 +157,7 @@ class Core:
                 self._scene_start[self.current] = self.clock.snapshot(now).beat
         if first:
             self.trail_s = self.config.trail.seconds  # afterwards trail.set owns it, so a reload cannot undo a live change
+            self.accent = self.config.accent.rgb()  # likewise accent.set
             self.mode = self.config.director.mode
             self.every_beats = self.config.director.every.in_beats(self.config.clock.beats_per_bar)
             self._last_slot = None
@@ -297,6 +299,8 @@ class Core:
                 self.clock.use_internal(cmd.bpm, now)  # keeps the beat continuous
         elif isinstance(cmd, P.TrailSet):
             self.trail_s = cmd.seconds
+        elif isinstance(cmd, P.AccentSet):
+            self.accent = cmd.color
         elif isinstance(cmd, P.TestPatternSet):
             self.test_pattern = cmd.on
         elif isinstance(cmd, P.MidiLearn):
@@ -495,7 +499,7 @@ class Core:
         env = make_env(
             beat=snap.beat, phase=snap.phase, beats_per_bar=sc.beats_per_bar or snap.beats_per_bar,
             scene_beat=snap.beat - self._scene_start.get(sid, snap.beat), time=now - self.t0, bpm=snap.bpm,
-            trans=trans, tile=tile, row_offset=row_offset, params=self.params.get(sid),
+            trans=trans, tile=tile, row_offset=row_offset, accent=self.accent, params=self.params.get(sid),
         )
         return SlotSpec(sc.evaluate(env), sc.spin(env), sc.asset_order)
 
@@ -596,6 +600,7 @@ class Core:
             "change_interval_beats": next_change[1],
             "master": self.master,
             "trail_s": self.trail_s,
+            "accent": list(self.accent),
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
             "test_pattern": self.test_pattern,

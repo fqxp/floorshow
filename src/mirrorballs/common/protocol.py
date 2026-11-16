@@ -5,14 +5,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
 from .config import Every, TransitionConfig
 
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 6
+REV = 7
 
 
 class _Cmd(BaseModel):
@@ -67,6 +67,18 @@ class TrailSet(_Cmd):
     seconds: float = Field(ge=0, le=3)  # how long what disappears keeps glowing; 0 = off
 
 
+class AccentSet(_Cmd):
+    cmd: Literal["accent.set"]
+    color: tuple[float, float, float]  # linear 0..1, what scenes read as ``accent``
+
+    @field_validator("color")
+    @classmethod
+    def _in_range(cls, v: tuple[float, float, float]) -> tuple[float, float, float]:
+        if not all(0.0 <= c <= 1.0 for c in v):
+            raise ValueError("colour components must be between 0 and 1")
+        return v
+
+
 class CalibrationBegin(_Cmd):
     cmd: Literal["calibration.begin"]
 
@@ -117,7 +129,7 @@ class Simple(_Cmd):
 
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
-    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | Simple,
+    | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | AccentSet | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

@@ -154,6 +154,43 @@ def nearest_length(beats: float, beats_per_bar: int) -> int:
     return min(range(len(LENGTHS)), key=lambda i: abs(LENGTHS[i][1] - bars))
 
 
+def all_tags(scenes: dict[str, Any]) -> list[str]:
+    """Every tag any scene has, sorted, for the tag filter."""
+    return sorted({t for sc in scenes.values() for t in sc.tags}, key=str.lower)
+
+
+def toggle_tag(selected: frozenset[str], tag: str | None) -> frozenset[str]:
+    """The tag filter after a click. ``tag`` None is "All", which clears the selection; an empty
+    selection is "All" too, so there is no way to select nothing."""
+    if tag is None:
+        return frozenset()
+    return selected - {tag} if tag in selected else selected | {tag}
+
+
+def filter_scenes(scenes: dict[str, Any], ids: list[str], tags: frozenset[str], only_accented: bool = False) -> list[str]:
+    """The ids the grid shows: scenes with any of ``tags`` (all of them when there are none), and
+    with ``only_accented`` only scenes that read the accent colour."""
+    out = []
+    for sid in ids:
+        sc = scenes[sid]
+        if tags and not tags.intersection(sc.tags):
+            continue
+        if only_accented and not sc.uses_accent:
+            continue
+        out.append(sid)
+    return out
+
+
+def rgb_to_hex(rgb: Any) -> str:
+    return "#" + "".join(f"{round(max(0.0, min(1.0, float(c))) * 255):02x}" for c in rgb)
+
+
+def accent_index(names_colors: list[tuple[str, str]], rgb: Any) -> int | None:
+    """Index of the named accent colour equal to ``rgb`` (to 8 bits), or None for a free colour."""
+    want = rgb_to_hex(rgb)
+    return next((i for i, (_, c) in enumerate(names_colors) if c.lower() == want), None)
+
+
 def display_name(scene_id: str) -> str:
     return scene_id.replace("-", " ").replace("_", " ").title()
 
@@ -177,12 +214,10 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
     """Keyboard shortcut (from the design's shortcut sheet) -> (action, argument), or None.
     ``name`` is the GDK key name, e.g. "space", "bracketleft", "1"."""
     if ctrl:
-        return {"Up": ("brightness", +5), "Down": ("brightness", -5), "comma": ("preferences", None),
+        return {"space": ("toggle-run", None), "Up": ("brightness", +5), "Down": ("brightness", -5), "comma": ("preferences", None),
                 "b": ("blackout", None), "B": ("blackout", None),
                 "q": ("quit", None), "Q": ("quit", None),
                 "question": ("shortcuts", None), "slash": ("shortcuts", None) if shift else None}.get(name)
-    if name == "space":
-        return ("toggle-run", None)
     if name in ("t", "T"):
         return ("tap", None)
     if name in ("d", "D"):

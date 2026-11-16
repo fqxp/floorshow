@@ -197,3 +197,14 @@ def test_the_scene_spin_is_outside_any_repeat(tmp_path):
     assert "spin.deg: unknown name 'i'" in str(e.value)
     sc = load_scene_text("schema: 1\nname: x\nspin: {axis: y, deg: 'fract(bar) * 360'}\nlayers:\n  - {type: fill}\n", "x", tmp_path)
     assert sc.spin(env(beat=2.0))[0] == "y"
+
+
+def test_scenes_read_the_accent_colour_and_say_so():
+    sc = scene("layers:\n  - {type: fill, color: accent}\n  - {type: band, lat: 0, width: 10, color: 'mix(accent, white, phase)'}\n")
+    assert sc.uses_accent
+    shapes = sc.evaluate(env(accent=(1.0, 0.5, 0.0)))
+    assert shapes[0].color == pytest.approx((1.0, 0.5, 0.0)) and shapes[1].color == pytest.approx((1.0, 0.5, 0.0))
+    assert sc.evaluate(env())[0].color == (1.0, 1.0, 1.0)  # white when nobody set one
+    assert not scene("layers:\n  - {type: fill, color: orange}\n").uses_accent
+    plain = scene("params:\n  accent: {type: color, default: '#ff0000'}\nlayers:\n  - {type: fill, color: param.accent}\n")
+    assert not plain.uses_accent  # a parameter that happens to be called accent is not the accent

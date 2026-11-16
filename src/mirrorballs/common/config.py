@@ -6,12 +6,13 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from .expr import parse_hex_color
 from .geometry import Calibration
 
 SCHEMA_VERSION = 1
@@ -139,7 +140,30 @@ class TrailConfig(_Base):
 
 
 class UiConfig(_Base):
-    beat_indicator: bool = True  # the beat tile and bar pips in the controller
+    beat_indicator: bool | None = None  # the indicator switch was removed; old files that still have this key keep loading
+
+
+def _hex(value: str) -> str:
+    parse_hex_color(value)  # raises ValueError for a bad colour
+    return value
+
+
+HexColor = Annotated[str, AfterValidator(_hex)]  # "#rrggbb"
+
+
+class NamedColor(_Base):
+    name: str
+    color: HexColor
+
+
+class AccentConfig(_Base):
+    # The accent colour scenes read as ``accent``. The controller sets it live; this is what the renderer
+    # starts with. ``colors`` are the named ones offered on the main window.
+    color: HexColor = "#ffffff"
+    colors: list[NamedColor] = []
+
+    def rgb(self) -> tuple[float, float, float]:
+        return parse_hex_color(self.color)
 
 
 class Config(_Base):
@@ -153,6 +177,7 @@ class Config(_Base):
     trail: TrailConfig = TrailConfig()
     safety: dict | None = None  # the flash limiter was removed; old files that still have this section keep loading
     ui: UiConfig = UiConfig()
+    accent: AccentConfig = AccentConfig()
 
 
 def _yaml() -> YAML:
