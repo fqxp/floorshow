@@ -5,9 +5,13 @@ build/
 dist/
 wheels/
 *.egg-info
+tmp/
 
 # Virtual environments
 .venv
 
 # Editor caches
 .ropeproject/
+
+# Claude
+.claude/worktrees/
