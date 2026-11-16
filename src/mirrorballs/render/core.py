@@ -20,6 +20,7 @@ from ..common.geometry import Calibration
 from ..common.scene import Scene, SceneError, load_library, make_env
 from .audio_state import AudioState
 from .frame import FrameSpec, SlotSpec
+from .midi_preview import MidiPreview
 from .gl import Overlay
 
 log = logging.getLogger("mirrorballs.core")
@@ -103,6 +104,8 @@ class Core:
         self._cal_before: Calibration | None = None
         self.midi_dirty = True
         self.audio = AudioState()  # the app feeds it the listener's messages and reads ``audio_wants``
+        self.midi_preview = MidiPreview()  # beat previews of every MIDI input port, while a client wants them
+        self.midi_preview_clients: set[Any] = set()
 
         self.reload(now, first=True)
 
@@ -199,10 +202,28 @@ class Core:
         out, self.outbox = self.outbox, []
         return out
 
-    def midi_wants(self) -> tuple[str | None, str | None]:
-        """(clock port substring or None, control port substring or None) the app should have open."""
+    def midi_wants(self) -> tuple[str | None, str | None, bool]:
+        """(clock port substring or None, control port substring or None, open every port for the previews)."""
         clock = self.config.clock.midi_port if self.config.clock.source == "midi" else None
-        return clock, self.config.midi.control_port
+        return clock, self.config.midi.control_port, bool(self.midi_preview_clients)
+
+    def _set_midi_preview(self, client: Any, on: bool) -> None:
+        before = bool(self.midi_preview_clients)
+        (self.midi_preview_clients.add if on else self.midi_preview_clients.discard)(client)
+        if bool(self.midi_preview_clients) != before:
+            self.midi_dirty = True
+
+    def midi_ports_state(self, now: float) -> list[dict[str, Any]]:
+        """The beat preview of every MIDI input port, while a client previews them."""
+        if not self.midi_preview_clients:
+            return []
+        out = []
+        for name, how in sorted((self.midi_status.get("ports") or {}).items()):
+            p = self.midi_preview.port(name, now)
+            if how == "busy":
+                p["status"] = "busy"
+            out.append(p)
+        return out
 
     def audio_wants(self) -> tuple[str | None, bool, float, float] | None:
         """What mirrorballs-listen should do: (tracked source, meter the others, min bpm, max bpm), or None when it
@@ -283,6 +304,7 @@ class Core:
         if client == self.cal_owner:
             self._end_calibration(commit=False)
         self.audio.preview(client, False)
+        self._set_midi_preview(client, False)
 
     def handle(self, cmd: P._Cmd, client: Any, now: float) -> dict[str, Any]:
         """Apply a validated command; returns the reply for the sender."""
@@ -329,6 +351,8 @@ class Core:
             self.learn, self.learn_role = cmd.on, cmd.role
         elif isinstance(cmd, P.AudioPreview):
             self.audio.preview(client, cmd.on)
+        elif isinstance(cmd, P.MidiPreviewSet):
+            self._set_midi_preview(client, cmd.on)
         elif isinstance(cmd, P.CalibrationBegin):
             self._begin_calibration(client)
         elif isinstance(cmd, P.CalibrationPreview):
@@ -403,9 +427,11 @@ class Core:
 
     # --- MIDI ----------------------------------------------------------------------------
 
-    def on_midi(self, roles: set[str], data: bytes, t: float) -> None:
+    def on_midi(self, roles: set[str], data: bytes, t: float, port: str | None = None) -> None:
         if not data:
             return
+        if port is not None and self.midi_preview_clients:
+            self.midi_preview.on_message(port, data, t)  # every port's messages feed the previews, the clock port too
         status = data[0]
         c = self.config.clock
         if "clock" in roles and c.source == "midi" and c.midi_mode == "beats":
@@ -636,5 +662,6 @@ class Core:
             "fps": round(self.fps, 1),
             "scene_errors": {sid: e.problems for sid, e in self.scene_errors.items()},
             "config_error": self.config_error,
-            "midi": self.midi_status,
+            "midi": {k: v for k, v in self.midi_status.items() if k != "ports"},
+            "midi_ports": self.midi_ports_state(now),
         }

@@ -29,8 +29,8 @@ def pump(core: Core, inbox: SimpleQueue, ipc: Sender, now: float) -> int:
         n += 1
         kind = item[0]
         if kind == "midi":
-            _, roles, data, t = item
-            core.on_midi(roles, data, t)
+            _, roles, data, t, *port = item  # the port name: from the MIDI manager, not from older tests
+            core.on_midi(roles, data, t, port[0] if port else None)
         elif kind == "audio":
             core.on_audio(item[1], now)
         elif kind == "disconnect":

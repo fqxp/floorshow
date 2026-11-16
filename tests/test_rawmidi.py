@@ -66,8 +66,8 @@ def test_manager_opens_a_raw_port_by_its_listed_name(tmp_path, monkeypatch):
     w = os.open(fifo, os.O_WRONLY)
     os.write(w, bytes([0x90, 50, 100]))
     assert wait_for(lambda: not inbox.empty())
-    kind, roles, msg, _t = inbox.get()
-    assert (kind, roles, msg) == ("midi", {"clock"}, bytes([0x90, 50, 100]))
+    kind, roles, msg, _t, port = inbox.get()
+    assert (kind, roles, msg, port) == ("midi", {"clock"}, bytes([0x90, 50, 100]), "VirMIDI 9-0 (raw hw:9,0)")
     os.close(w)
     mgr.close()
 

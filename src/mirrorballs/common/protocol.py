@@ -131,6 +131,13 @@ class AudioPreview(_Cmd):
     on: bool
 
 
+class MidiPreviewSet(_Cmd):
+    cmd: Literal["midi.preview"]
+    # While any client has this on, every MIDI input port is opened and the state's "midi_ports" say which ones carry
+    # a beat (clock ticks or evenly repeating notes) and at what tempo. A client that disconnects is off.
+    on: bool
+
+
 class Simple(_Cmd):
     cmd: Literal["reload", "quit", "tap", "sync_downbeat", "scene.next", "scene.prev"]
 
@@ -138,7 +145,7 @@ class Simple(_Cmd):
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
     | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | AccentSet
-    | AudioPreview | Simple,
+    | AudioPreview | MidiPreviewSet | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

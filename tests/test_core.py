@@ -205,12 +205,12 @@ midi:
     c.on_midi(ctl, bytes([0x90, 50, 90]), 100.0)
     assert c.current == "a"
     c.on_midi(ctl, bytes([0xC0, 99]), 100.0)  # out-of-range index: logged, not raised
-    assert c.midi_wants() == (None, "pad")
+    assert c.midi_wants() == (None, "pad", False)
 
 
 def test_midi_clock_routing(env):
     c = make(env, "clock: {source: midi, midi_port: 'Test'}\n")
-    assert c.midi_wants() == ("Test", None) and c.clock.source == "midi"
+    assert c.midi_wants() == ("Test", None, False) and c.clock.source == "midi"
     for k in range(50):
         c.on_midi({"clock"}, bytes([0xF8]), 100.0 + k * 60 / (120 * 24))
     snap = c.clock.snapshot(100.0 + 49 * 60 / (120 * 24))
@@ -402,7 +402,7 @@ MIXXX = "clock: {source: midi, midi_port: mixxx, midi_mode: beats}\n"
 
 def test_mixxx_midi_for_light_beat_notes_drive_the_clock(env):
     c = make(env, MIXXX)
-    assert c.midi_wants() == ("mixxx", None)
+    assert c.midi_wants() == ("mixxx", None, False)
     clk = {"clock"}
     for k in range(12):
         c.on_midi(clk, bytes([0x90, 0x32, 0x64]), 100.0 + k * 0.5)  # D, velocity 100: the beat
