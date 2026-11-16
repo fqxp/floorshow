@@ -24,7 +24,7 @@ from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
 from .preview_widgets import PreviewManager, PreviewPicture  # noqa: E402
 from .previews import DEFAULT_TILE_DEG, OVERSAMPLE, THUMB_H, THUMB_W, Look, PreviewCache  # noqa: E402
-from .source_picker import HoverPreview, SourcePicker  # noqa: E402
+from .source_picker import AudioSourceDropdown, HoverPreview, SourcePicker  # noqa: E402
 from .store import ConfigStore  # noqa: E402
 from .widgets import Segmented, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
@@ -337,12 +337,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Resting the pointer on "Audio" shows the chosen audio source's tempo, so it is clear before switching
         # whether that source has a beat at all.
         self.audio_hover = HoverPreview(self.clock_seg.buttons["audio"], self._audio_hover_text)
-        # Below the strip, for the MIDI and audio clocks: what there is to listen to, and what each one carries
-        self.midi_picker = SourcePicker("MIDI port", False, self._pick_midi)
-        self.audio_picker = SourcePicker("Audio source", True, self._pick_audio)
+        # For the audio clock: a dropdown of the sources (with level meters) beside Downbeat. For the MIDI clock: the
+        # ports below the strip, each with the beat it carries.
+        self.audio_picker = AudioSourceDropdown(self._pick_audio)
+        self.audio_picker.set_tooltip_text("Audio source: what the beat is taken from")
+        self.midi_picker = SourcePicker("MIDI port", self._pick_midi)
         strip = vbox(10, hbox(12, self.source_box, Gtk.Box(hexpand=True), self.clock_seg),
-                     hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.downbeat_btn, self.tap_btn),
-                     self.midi_picker, self.audio_picker,
+                     hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.audio_picker, self.downbeat_btn, self.tap_btn),
+                     self.midi_picker,
                      hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, strip, hexpand=True)
         self.clock_panel.add_css_class("panel")
@@ -753,8 +755,9 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             if shown == "audio":
                 audio = st.get("audio")
-                self.audio_picker.set_items(sm.audio_items(audio), sm.selected_audio(audio, self.cfg.clock.audio_source),
-                                            "No audio source found" if audio else "")
+                items = sm.audio_items(audio)
+                self.audio_picker.set_items(items, sm.selected_audio(audio, self.cfg.clock.audio_source),
+                                            sm.audio_placeholder(items, self.cfg.clock.audio_source))
             elif shown == "midi":
                 ports = st.get("midi_ports")
                 self.midi_picker.set_items(sm.midi_items(ports), sm.selected_midi(ports, self.cfg.clock.midi_port),

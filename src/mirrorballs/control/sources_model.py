@@ -76,6 +76,13 @@ def _short_port(name: str) -> str:
     return name
 
 
+def audio_placeholder(items: list[Item], cfg_source: str | None) -> str:
+    """The dropdown's entry while the chosen source is not among the sources."""
+    if cfg_source:
+        return f"{cfg_source} (not there)"
+    return "Choose a source…" if items else "No audio source found"
+
+
 def selected_audio(audio: dict[str, Any] | None, cfg_source: str | None) -> str | None:
     """The id to show as chosen: the resolved source, else what the config names (it may be unplugged)."""
     return (audio or {}).get("source") or cfg_source

@@ -52,7 +52,7 @@ def shot(win, name, widget=None):
         win = widget
     w, h = win.get_width(), win.get_height()
     print("size", w, h, "min", win.get_preferred_size().minimum_size.width, win.get_preferred_size().minimum_size.height)
-    for _ in range(20):  # mid-redraw the paintable can come out empty (seen under Broadway): wait for a frame
+    for _ in range(80):  # mid-redraw the paintable can come out empty (seen under Broadway): wait for a frame
         snap = Gtk.Snapshot()
         Gtk.WidgetPaintable.new(win).snapshot(snap, w, h)
         node = snap.to_node()
@@ -119,6 +119,11 @@ def on_activate(app):
     win.cfg = win.store.load()
     win.apply_state(state("kick-spot", ids, clock=clock(source="audio", port=None, bpm=124.3, beat=6.02), audio=audio))
     shot(win, "10_audio_picker")
+    win.audio_picker.activate()  # the open list: the dropdown's popover is its own surface
+    pop = win.audio_picker.get_last_child()
+    if isinstance(pop, Gtk.Popover):
+        shot(win, "10b_audio_list", pop)
+        pop.popdown()
     win.store.update({"clock": {"source": "midi", "midi_port": "Mixxx"}})
     win.cfg = win.store.load()
     ports = [{"name": "Mixxx 1", "status": "beats", "bpm": 124.0, "beat_time": time.monotonic(), "note": 50},

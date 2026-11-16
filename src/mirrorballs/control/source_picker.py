@@ -41,15 +41,17 @@ def _rounded(cr: Any, x: float, y: float, w: float, h: float, r: float) -> None:
 class LevelMeter(Gtk.DrawingArea):
     """One thin column per channel: RMS as the bar, the peak as a tick. Its height is in the stylesheet (em)."""
 
-    def __init__(self, channels: int = 2) -> None:
+    def __init__(self, channels: int = 2, width: int | None = None) -> None:
+        """``width``: fixed, the columns share it (so meters of different sources line up); None: 4 px a channel."""
         super().__init__()
         self.add_css_class("level-meter")
         self.set_valign(Gtk.Align.CENTER)
         self.dark = True
+        self.fixed_width = width
         self.levels: tuple[float, ...] = (METER_FLOOR_DB,) * channels
         self.peaks: tuple[float, ...] = self.levels
         self._painted = 0.0
-        self.set_content_width(max(1, channels) * 4)
+        self.set_content_width(width or max(1, channels) * 4)
         self.set_draw_func(self._draw)
 
     def set_levels(self, levels: tuple[float, ...], peaks: tuple[float, ...]) -> None:
@@ -59,7 +61,7 @@ class LevelMeter(Gtk.DrawingArea):
         if now - self._painted < REPAINT_S:
             return
         self._painted = now
-        if len(levels) != len(self.levels):
+        if len(levels) != len(self.levels) and self.fixed_width is None:
             self.set_content_width(max(1, len(levels)) * 4)
         self.levels, self.peaks = levels, peaks
         self.queue_draw()
@@ -118,30 +120,22 @@ class Pulse(Gtk.DrawingArea):
 
 
 class SourceChip(Gtk.ToggleButton):
-    def __init__(self, item: sm.Item, audio: bool) -> None:
+    """One MIDI port: a beat tile at the port's tempo, the name, and what the port carries."""
+
+    def __init__(self, item: sm.Item) -> None:
         super().__init__()
         self.add_css_class("chip-toggle")
         self.add_css_class("small")
         self.add_css_class("source-chip")
         self.item_id = item.id
-        self.meter = LevelMeter(len(item.levels) or 2) if audio else None
-        self.pulse = None if audio else Pulse()
-        # An output's monitor and an input are told apart by an icon, which leaves the chip room for the name
-        shown = item.name.removeprefix("Monitor of ") if item.kind == "monitor" else item.name
-        kind_icon = None
-        if audio:
-            kind_icon = Gtk.Image.new_from_icon_name(
-                "audio-speakers-symbolic" if item.kind == "monitor" else "audio-input-microphone-symbolic")
-            kind_icon.add_css_class("chip-kind")
-        self.name = label(shown)
+        self.pulse = Pulse()
+        self.name = label(item.name)
         self.name.set_ellipsize(Pango.EllipsizeMode.END)
-        # Never squeezed below a readable start of the name (the row scrolls sideways instead), never wider than
-        # a long port name needs to be told apart
-        self.name.set_width_chars(min(len(shown), 12))
+        # Never squeezed below a readable start of the name, never wider than a long port name needs to be told apart
+        self.name.set_width_chars(min(len(item.name), 12))
         self.name.set_max_width_chars(20)
         self.status = label("", "chip-status")
-        box = hbox(6, *[w for w in (self.meter or self.pulse, kind_icon, self.name, self.status) if w is not None])
-        self.set_child(box)
+        self.set_child(hbox(6, self.pulse, self.name, self.status))
         self.set_tooltip_text(item.name if item.id == item.name else f"{item.name}\n{item.id}")
         self.item = item
         self.update(item)
@@ -151,29 +145,23 @@ class SourceChip(Gtk.ToggleButton):
         if self.status.get_text() != item.status:
             self.status.set_text(item.status)
             self.status.set_visible(bool(item.status))
-        if self.meter is not None:
-            self.meter.set_levels(item.levels, item.peaks)
         if item.dim != self.has_css_class("dim"):
             (self.add_css_class if item.dim else self.remove_css_class)("dim")
 
     def tick(self, now: float) -> None:
-        if self.pulse is not None:
-            self.pulse.set_phase(sm.beat_phase(self.item.bpm, self.item.beat_time, now))
+        self.pulse.set_phase(sm.beat_phase(self.item.bpm, self.item.beat_time, now))
 
     def set_dark(self, dark: bool) -> None:
-        for w in (self.meter, self.pulse):
-            if w is not None:
-                w.dark = dark
-                w.queue_draw()
+        self.pulse.dark = dark
+        self.pulse.queue_draw()
 
 
 class SourcePicker(Gtk.Box):
-    """A row of chips, one per audio source or MIDI port; the chosen one is checked. ``on_pick(id)`` on a click."""
+    """The MIDI ports as a row of chips; the chosen one is checked. ``on_pick(id)`` on a click."""
 
-    def __init__(self, title: str, audio: bool, on_pick: Callable[[str], None]) -> None:
+    def __init__(self, title: str, on_pick: Callable[[str], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # the title above: the chips get the width
         self.add_css_class("source-picker")
-        self.audio = audio
         self.on_pick = on_pick
         self.title = label(title.upper(), "hint")
         # Every source in view at once: the chips wrap like words (each as wide as its name), two lines before the
@@ -203,7 +191,7 @@ class SourcePicker(Gtk.Box):
             self.chips = {}
             first: SourceChip | None = None
             for it in items:
-                chip = SourceChip(it, self.audio)
+                chip = SourceChip(it)
                 chip.set_dark(self.dark)
                 if first is None:
                     first = chip
@@ -246,6 +234,118 @@ class SourcePicker(Gtk.Box):
         self.dark = dark
         for c in self.chips.values():
             c.set_dark(dark)
+
+
+class AudioSourceDropdown(Gtk.DropDown):
+    """The audio sources as a dropdown: full names (an output's monitor says so), a level meter per channel in every
+    entry and on the button, nothing else. Its width never changes, so neither does the strip's layout.
+
+    ``on_pick(id)`` when a source is chosen from the list. An entry with an empty id stands for "nothing chosen" or a
+    chosen source that is not there; it is shown but cannot be picked."""
+
+    NAME_CHARS = 18
+    METER_PX = 16  # every entry's meter this wide, whatever its channel count: the names line up
+
+    def __init__(self, on_pick: Callable[[str], None]) -> None:
+        super().__init__()
+        self.add_css_class("audio-source")
+        self.set_valign(Gtk.Align.CENTER)
+        self.on_pick = on_pick
+        self.ids: list[str] = []
+        self._items: dict[str, sm.Item] = {}
+        self._labels: list[str] = []
+        self._meters: dict[str, list[LevelMeter]] = {}  # id -> meters on screen for it (list rows and the button)
+        self._key: Any = None
+        self._guard = False
+        self.dark = True
+        factory = Gtk.SignalListItemFactory()
+        factory.connect("setup", self._setup)
+        factory.connect("bind", self._bind)
+        factory.connect("unbind", self._unbind)
+        self.set_factory(factory)
+        self.connect("notify::selected", self._on_selected)
+
+    # --- rows ------------------------------------------------------------------------------
+
+    def _setup(self, _f: Any, li: Any) -> None:
+        name = label("")
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        name.set_width_chars(self.NAME_CHARS)  # fixed: a longer or shorter name never resizes the button
+        name.set_max_width_chars(self.NAME_CHARS)
+        li.set_child(hbox(8, LevelMeter(2, width=self.METER_PX), name))
+
+    @staticmethod
+    def _parts(li: Any) -> tuple[Gtk.Box, LevelMeter, Gtk.Label]:
+        # (found through the item's child: Python attributes on a ListItem do not reliably survive between signals)
+        box = li.get_child()
+        return box, box.get_first_child(), box.get_last_child()
+
+    def _bind(self, _f: Any, li: Any) -> None:
+        box, meter, name = self._parts(li)
+        pos = li.get_position()
+        sid = self.ids[pos] if 0 <= pos < len(self.ids) else ""
+        name.set_text(self._labels[pos] if 0 <= pos < len(self._labels) else "")
+        item = self._items.get(sid)
+        meter.set_visible(item is not None)
+        meter.dark = self.dark
+        if item is not None:
+            meter._painted = 0.0
+            meter.set_levels(item.levels, item.peaks)
+            self._meters.setdefault(sid, []).append(meter)
+        (box.add_css_class if item is not None and item.dim else box.remove_css_class)("dim")
+
+    def _unbind(self, _f: Any, li: Any) -> None:
+        _box, meter, _name = self._parts(li)
+        for meters in self._meters.values():
+            if meter in meters:
+                meters.remove(meter)
+
+    # --- content ---------------------------------------------------------------------------
+
+    def set_items(self, items: list[sm.Item], selected: str | None, placeholder: str) -> None:
+        """``placeholder``: the text of the extra entry shown while ``selected`` is not among ``items`` (nothing
+        chosen yet, or the chosen source is unplugged)."""
+        self._items = {i.id: i for i in items}
+        ids, labels = [i.id for i in items], [i.name for i in items]
+        if selected not in self._items:
+            ids.insert(0, "")
+            labels.insert(0, placeholder)
+        key = (tuple(ids), tuple(labels))
+        if key != self._key:
+            self._key = key
+            self.ids, self._labels = ids, labels
+            self._meters = {}
+            self._guard = True
+            try:
+                self.set_model(Gtk.StringList.new(labels))
+            finally:
+                self._guard = False
+        else:
+            for it in items:
+                for m in self._meters.get(it.id, []):
+                    m.set_levels(it.levels, it.peaks)
+        index = ids.index(selected) if selected in ids else 0
+        if self.get_selected() != index:
+            self._guard = True
+            try:
+                self.set_selected(index)
+            finally:
+                self._guard = False
+
+    def selected_id(self) -> str:
+        pos = self.get_selected()
+        return self.ids[pos] if 0 <= pos < len(self.ids) else ""
+
+    def _on_selected(self, *_a: Any) -> None:
+        if not self._guard and self.selected_id():
+            self.on_pick(self.selected_id())
+
+    def set_dark(self, dark: bool) -> None:
+        self.dark = dark
+        for meters in self._meters.values():
+            for m in meters:
+                m.dark = dark
+                m.queue_draw()
 
 
 class HoverPreview:

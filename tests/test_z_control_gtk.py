@@ -1362,24 +1362,46 @@ def toasts_of(w):
     return shown
 
 
-def test_the_audio_picker_shows_every_source_with_its_meter_and_picks_one(win):
+def dropdown_labels(dd):
+    m = dd.get_model()
+    return [m.get_string(i) for i in range(m.get_n_items())]
+
+
+def test_the_audio_dropdown_lists_the_sources_by_name_and_picks_one(win):
     w, fake = win
     shown = toasts_of(w)
     w.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
     w.cfg = w.store.load()
     w.set_connection(True)
     w.apply_state(st(clock=dict(st()["clock"], source="audio", bpm=124.3), audio=audio_state()))
-    assert w.audio_picker.get_visible() and not w.midi_picker.get_visible()
-    chips = w.audio_picker.chips
-    assert list(chips) == ["alsa_output.speakers", "alsa_input.mic"]
-    assert chips["alsa_output.speakers"].get_active() and chips["alsa_output.speakers"].status.get_text() == "124 BPM"
-    assert chips["alsa_output.speakers"].meter.levels == (-14.0, -16.0)
-    assert chips["alsa_input.mic"].status.get_text() == "silent" and chips["alsa_input.mic"].has_css_class("dim")
+    pump(50)
+    dd = w.audio_picker
+    assert dd.get_visible() and not w.midi_picker.get_visible()
+    # full names (a monitor says so), no tempo or status in them
+    assert dropdown_labels(dd) == ["Monitor of Speakers", "Built-in mic"]
+    assert dd.selected_id() == "alsa_output.speakers"
+    assert dd._meters["alsa_output.speakers"][0].levels == (-14.0, -16.0)  # the button's meter
     assert w.source_chip.get_text() == "Audio · 124.3 BPM · Monitor of Speakers"
     fake.sent.clear()
-    chips["alsa_input.mic"].set_active(True)  # a click
+    dd.set_selected(1)  # chosen from the list
     assert w.store.load().clock.audio_source == "alsa_input.mic" and ("reload", {}) in fake.sent
     assert shown[-1] == "Audio · Built-in mic is silent"
+
+
+def test_the_audio_dropdown_keeps_its_width_and_says_when_nothing_is_chosen(win):
+    w, _ = win
+    w.set_connection(True)
+    w.store.update({"clock": {"source": "audio"}})
+    w.cfg = w.store.load()
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(source=None)))
+    pump(50)
+    dd = w.audio_picker
+    assert dropdown_labels(dd) == ["Choose a source…", "Monitor of Speakers", "Built-in mic"] and dd.selected_id() == ""
+    width = dd.get_preferred_size().natural_size.width
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=dict(audio_state(source=None), sources=[
+        dict(audio_state()["sources"][0], name="Monitor of A Much Longer Output Name Than Usual")])))
+    pump(50)
+    assert dd.get_preferred_size().natural_size.width == width
 
 
 def test_levels_move_without_refreshing_the_window(win):
@@ -1388,14 +1410,16 @@ def test_levels_move_without_refreshing_the_window(win):
     w.cfg = w.store.load()
     w.set_connection(True)
     w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state()))
+    pump(50)
     refreshes = []
     real = w.refresh
     w.refresh = lambda: (refreshes.append(1), real())
     w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-30.0)))
-    w.audio_picker.chips["alsa_output.speakers"].meter._painted = 0.0  # not throttled for the next one
+    meter = w.audio_picker._meters["alsa_output.speakers"][0]
+    meter._painted = 0.0  # not throttled for the next one
     w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-8.0)))
     assert not refreshes
-    assert w.audio_picker.chips["alsa_output.speakers"].meter.levels == (-8.0, -10.0)
+    assert meter.levels == (-8.0, -10.0)
 
 
 def test_switching_to_a_source_without_a_beat_says_so(win):

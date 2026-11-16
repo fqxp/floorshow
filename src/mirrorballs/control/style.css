@@ -170,7 +170,7 @@ button.swatch-choice.chosen { border-color: @acc; }
 .source-chip .chip-status { color: @t3; font-size: 0.93em; }
 .source-chip:checked .chip-status { color: @t2; }
 .source-chip.dim { opacity: 0.55; }
-.source-chip .chip-kind { color: @t3; -gtk-icon-size: 0.93em; }
+.audio-source box.dim { opacity: 0.55; }   /* a silent source in the audio dropdown */
 .level-meter { min-height: 1.07em; }   /* one column per channel; the width follows the channel count */
 .pulse { min-width: 0.79em; min-height: 0.79em; }
 popover.hover-preview > contents { background: @bg3; border: 1px solid @line2; border-radius: 0.64em; padding: 0.5em 0.79em; color: @t1; }
