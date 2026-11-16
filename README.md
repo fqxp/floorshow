@@ -1,138 +1,117 @@
 # mirrorballs3
 
-> **Work in progress: the app.** The demo below is being turned into a two-process app: a
-> projector output (`mirrorballs-render`) and a GTK4/libadwaita controller (`mirrorballs`).
-> The controller's main window, its scenes and preferences dialogs and calibration are built; the motor is not.
-> Calibration sits behind its own menu item, because it is redone every time the rig is set up, and runs as a
-> wizard: the ball itself (diameter, tile size and whether a motor turns it, all rough — they only seed the
-> steps that follow), the silhouette, the ball axis (roll and tilt, from where the pole eyelet appears), the
-> tile rows (pitch and offset, checked against painted rows) and a confirmation step that projects a
-> turning globe. The saved calibration records the output window it was measured in, so the ball keeps the
-> size it was measured at whatever that window later does; a `calibration:` block written before this
-> (no `width`/`height`) is still read the old way, as plain fractions of the window, so re-run the wizard
-> once to pick it up.
-> `docs/design-brief.md` is the UI brief; the design itself is the "Mirrorballs Control UI" artifact.
+Mirrorballs drives a video projector aimed at a disco mirror ball. Bands, rings and spots are mapped onto
+the calibrated sphere so they land on the ball, follow the music's beat and leave the rest of the room
+dark. One operator runs the show from a laptop while the projector shows only the ball's light.
 
-**Writing scenes:** [docs/scenes-tutorial.md](docs/scenes-tutorial.md) is a worked introduction,
-[docs/scenes-reference.md](docs/scenes-reference.md) lists every key, variable and function.
+## Features
 
-## The app
+- **Two processes.** A fullscreen output window for the projector (`mirrorballs-render`) and a GTK4/libadwaita
+  control window (`mirrorballs`). You can close, kill or restart the controller without touching the
+  running show.
+- **Scenes as YAML files.** Layers (fill, band, meridian, circle, ring, annulus, textures) with blend modes,
+  per-frame expressions over `beat`, `phase`, `bar` and so on, adjustable parameters, spin and transitions.
+  Saved files reload into the running show. Bundled examples are in `scenes/`.
+- **Beat clock.** Uses an internal BPM with tap tempo, standard MIDI clock, or per-beat MIDI notes (for example
+  Mixxx's "MIDI for light" script), including ALSA VirMIDI raw devices. A Downbeat button (key D) marks
+  bar starts.
+- **Director.** Manual, random or sequence mode, switching every N bars. Transitions are crossfade, cut,
+  latitude wipe, iris or flash.
+- **Live controls.** Brightness, blackout, a trail that fades out whatever disappears, and scene
+  parameters. MIDI notes, program changes or CC messages can trigger scene actions. Ctrl+Space starts and
+  stops the show.
+- **Accent colour.** One colour for the whole show, picked from named colours (menu › Accent colors…) or
+  freely in the Main box. Scenes that use `accent` follow it.
+- **Scene filter.** Tag chips above the scene cards narrow them down; "Only accented" shows only the
+  scenes that follow the accent colour.
+- **Calibration wizard.** Records the ball's size and tile layout, its silhouette in the projector image,
+  its axis (roll and tilt) and its tile rows, then confirms with a turning globe. The calibration remembers
+  the output window it was measured in.
+- **Scriptable.** `mirrorballs-ctl` controls a running renderer from a shell (scene, mode, master, trail,
+  param, state, watch).
+- **Robust output.** The renderer holds an idle inhibitor so the screen doesn't blank, and a watchdog
+  writes thread stacks when frames stall. The controller shows a banner when that happens.
 
-```sh
+Not built yet: the motor that turns the ball.
+
+## Installation
+
+Needs Linux with GNOME (or another GTK4 desktop), Python 3.13 and [uv](https://docs.astral.sh/uv/). The
+controller needs these system packages:
+
+```bash
+sudo apt install gir1.2-gtk-4.0 gir1.2-adw-1 libgirepository-2.0-dev libcairo2-dev pkg-config
+```
+
+Then, in the repository:
+
+```bash
 uv sync --extra render --extra control
-uv run mirrorballs                 # the controller; Start launches the renderer (detached) if none is running
-uv run mirrorballs-render          # or start the renderer directly: an ordinary window "Mirrorballs Output"
-uv run mirrorballs-ctl scenes      # from another shell
-uv run mirrorballs-ctl scene ripples --transition crossfade --beats 2
-uv run mirrorballs-ctl mode random --bars 8
+```
+
+```bash
+uv run mirrorballs
+```
+
+**Start** in the controller launches the renderer if it isn't already running. Move the output window to
+the projector (Super+Shift+←/→) and press **F11** in it. Run **Calibration** from the menu every time you
+set up the rig.
+
+Config lives in `~/.config/mirrorballs/config.yaml`, your scenes in `~/.config/mirrorballs/scenes/*.yaml`.
+Both reload while the app runs. To write scenes, see [docs/scenes-tutorial.md](docs/scenes-tutorial.md) and
+[docs/scenes-reference.md](docs/scenes-reference.md).
+
+## Development
+
+[mise](https://mise.jdx.dev/) pins Python and uv (`mise.toml`). Install dependencies as above. Then:
+
+```bash
 uv run --extra render --extra control pytest
-gtk4-broadwayd :7 &                # ... or headless: GTK4's HTML5 backend, no X and no Wayland needed
+```
+
+The GL tests use a standalone EGL context and need no display. The controller's GTK tests need one and
+skip without it. To run them headless, use GTK's Broadway backend (from `libgtk-4-bin`):
+
+```bash
+gtk4-broadwayd :7 &
+```
+
+```bash
 env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 uv run --extra render --extra control pytest
-uv run --extra control python tools/screenshot_ui.py OUTDIR   # render the main window in each design state
 ```
 
-The GL tests use a standalone EGL context and need no display at all. The controller's GTK tests do, and
-skip without one; `gtk4-broadwayd` (in `libgtk-4-bin`) gives them one that opens no window, which is also how
-the screenshot tools can run without taking over the screen.
+Helpers in `tools/`:
 
-The output is a normal window: move it to the projector with Super+Shift+←/→ and press **F11** in it (fullscreen on
-the second monitor, best effort). If you prefer GNOME's own fullscreen, bind a shortcut:
+- `midi_clock.py --bpm 128 [--beat-notes]` fakes a MIDI clock or Mixxx-style beat notes.
+- `screenshot_ui.py` and `screenshot_dialogs.py` render the windows in each design state.
+- `swap_stall_repro.py` compares frame-loop structures.
 
-```sh
-gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "['<Super>F11']"
-```
+The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.stacks` on a stall or after
+`kill -USR1 <pid>`).
 
-Config lives in `~/.config/mirrorballs/config.yaml`, scenes in `~/.config/mirrorballs/scenes/*.yaml`
-(bundled examples in `scenes/`). Both are hot-reloaded. Fake a MIDI clock with
-`uv run python tools/midi_clock.py --bpm 128`, then set `clock: {source: midi, midi_port: "mirrorballs test clock"}`.
-
-**Beat notes instead of MIDI clock.** Mixxx sends no MIDI clock. Its
-[MIDI for light](https://github.com/mixxxdj/mixxx/wiki/MIDI%20clock%20output) script sends a note on every beat
-instead (D, velocity 100) and the tempo as a second note (E, value = BPM - 50). Use that with
-(Preferences > Clock > Beat signal > Beat notes):
-
-```yaml
-clock:
-  source: midi
-  midi_port: mixxx            # substring of the port name
-  midi_mode: beats            # "clock" (default) = standard 24-per-beat MIDI clock
-  beat_note: 50               # D; a note-on with this number is one beat
-  beat_velocity: 100          # 0 = any velocity
-  midi_channel: 0             # 0 = any channel
-  tempo_note: 52              # E; its value + tempo_offset is the announced tempo (shown only); -1 = off
-  tempo_offset: 50
-```
-
-If the beat does not arrive, check what is sent with `aseqdump -l` / `aseqdump -p <port>`, or click **Detect** next to
-the beat note in Preferences > Clock: the first note that arrives fills in note, velocity and channel.
-
-**VirMIDI.** If Mixxx's output device is a "VirMIDI" port (Mixxx offers nothing else on some systems), what it
-sends appears only on the matching *raw* device, which a sequencer client cannot subscribe to. Pick the entry
-with "(raw hw:1,0)" in its name, e.g. "VirMIDI 1-0 (raw hw:1,0)": the renderer then reads `/dev/snd/midiC1D0`
-itself (you need read access to it, which the desktop session normally grants).
-
-The beats set the speed and phase. A beat note does not say which beat starts a bar, so press **Downbeat** (key D,
-or `mirrorballs-ctl sync`) on the first beat of a bar. Test without Mixxx: `uv run python tools/midi_clock.py --bpm 100 --beat-notes`.
-The renderer also holds a GNOME idle inhibitor while it runs, so the screen does not blank mid-show. It is
-released when the renderer exits, even if it is killed.
-
-**If the output window misbehaves.** The renderer is a normal window: nothing special except that it can go
-fullscreen. Its main thread only pumps window events; a separate thread renders and presents frames, so a
-blocked swap can never stop the window from answering the compositor. If frames stop anyway, the controller
-shows a banner, and the renderer writes every thread's Python stack to `~/.local/state/mirrorballs/render.stacks`
-(also on demand: `kill -USR1 <pid>`). `render.log` records window focus/minimise events, blocked swaps and
-every command with the client that sent it. `tools/swap_stall_repro.py` compares the two loop structures.
-
-**Trail.** Light snapping on and off on a mirror ball is a very big movement. The **Trail** slider
-(Master panel) fades out whatever disappears over up to two seconds, which reads as smooth without
-putting the hits behind the beat: something that lights up is still instantly at full brightness.
-It is off by default; `trail: {seconds: 0.25}` in config.yaml sets what the renderer starts with, and
-`mirrorballs-ctl trail 0.25` changes it live. A blackout stays instant, and nothing smears while
-calibrating.
-
-Only the projector-facing hemisphere of the ball is lit, so keep scene longitudes within about -90..90.
-
----
-
-Computes the 2D image to feed a real video projector so that, once
-projected onto a real physical sphere placed in its light cone, chosen
-shapes appear to glow on the ball while everything else stays dark.
-
-See `~/.claude/plans/lexical-munching-blossom.md` for the full design
-(math derivation, shape model, rendering pipeline).
+`docs/design-brief.md` is the UI brief and `docs/design/` holds the UI design boards and their generator.
 
 ## How it works
 
-- **`shapes.py`** -- shapes are defined purely as functions of direction
-  from the ball's center (a lat/lon-independent unit vector). Every
-  shape (filled circle, ring outline, latitude band, meridian band,
-  growing/moving circle) reduces to one primitive, `Annulus`: a center
-  direction plus an inner/outer angular radius, either of which can be
-  a callable of time for animation.
-- **`shaders/sphere.frag`** -- the actual per-pixel math, entirely on
-  the GPU: pixel -> ray (from the real projector's position/FOV) ->
-  ray-sphere intersection -> surface direction -> evaluate every active
-  shape at that direction -> composite. A ray that misses the ball is
-  just black -- that's the dark surrounding, nothing extra needed.
-- **`render.py`** -- moderngl setup (fullscreen quad + the shader),
-  `ProjectorConfig`/`BallConfig` for the real-world calibration
-  (throw distance, lens FOV, ball radius), and the per-frame uniform
-  upload. Python only ever computes a few floats per shape per frame;
-  it never touches a pixel.
-- **`demo.py`** -- a runnable visual sanity check: a centered circle, a
-  band sweeping from the north pole to the south pole, and a static
-  meridian band.
+- **Renderer.** Everything that makes the show happens here: the beat clock, the director (which scene
+  runs and how it transitions), the scene library, config hot-reload and calibration mode. This core has
+  no GL, window or device code, so it can be tested with simulated time. Around it, the main thread only
+  handles window events, a separate thread renders and presents frames, and MIDI input and the control
+  socket feed a single inbox.
+- **GPU pipeline.** Each shape reduces to one primitive: a center direction on the ball with an inner and
+  outer angular radius. A fragment shader maps each pixel through the calibrated silhouette to a direction
+  on the ball and evaluates all shapes there. Later passes blend the two scenes of a transition and add
+  the trail, then apply master brightness and the calibration overlay. Because those come after the
+  trail, blackout is instant and calibration lines don't smear. Python only uploads a few numbers per
+  shape per frame.
+- **Scenes.** YAML is validated into a model, and every error in a file is reported at once. Expressions
+  use a small whitelisted language, so scene files can be shared safely. They are compiled once and
+  evaluated every frame.
+- **Controller.** A thin remote. It shows the state the renderer streams to it and sends commands back. It
+  is the only process that writes `config.yaml` (the renderer just reloads it), and it reads the scene
+  files itself, so it still works offline. Its logic is kept apart from GTK so it can be tested.
+- **Protocol.** JSON Lines over a Unix socket: requests with replies, plus events the renderer sends
+  unprompted. The controller and `mirrorballs-ctl` both use it.
 
-## Run
-
-```sh
-mise exec -- uv run python demo.py
-```
-
-Opens fullscreen on the second monitor if one is connected (the real
-projector), otherwise a windowed preview. Esc quits.
-
-`demo.py`'s `ProjectorConfig` uses a close-in distance (1.2m) purely so
-the ball fills the preview window; swap in the real projector's
-measured position and lens FOV (throw distance ~3-5m) for the actual
-rig.
+`demo.py`, `render.py`, `shapes.py` and `shaders/` at the top level are the original single-file prototype.
+The app lives in `src/mirrorballs/`.
