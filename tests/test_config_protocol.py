@@ -158,11 +158,11 @@ def test_a_config_with_the_removed_safety_section_still_loads(tmp_path):
     assert load_config(p).clock.bpm == 100
 
 
-def test_accent_colours_are_checked_and_an_old_indicator_key_still_loads(tmp_path):
+def test_the_accent_colour_is_checked_and_old_keys_still_load(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text("ui: {beat_indicator: false}\naccent: {color: '#ff8800', colors: [{name: Warm, color: '#ff8800'}]}\n")
-    c = load_config(p)
-    assert c.accent.rgb() == pytest.approx((1.0, 0x88 / 255, 0.0)) and c.accent.colors[0].name == "Warm"
-    p.write_text("accent: {colors: [{name: Bad, color: 'orange'}]}\n")
-    with pytest.raises(ConfigError, match="accent.colors.0.color"):
+    c = load_config(p)  # named colours were removed, but a file that has them still loads
+    assert c.accent.rgb() == pytest.approx((1.0, 0x88 / 255, 0.0))
+    p.write_text("accent: {color: orange}\n")
+    with pytest.raises(ConfigError, match="accent.color"):
         load_config(p)

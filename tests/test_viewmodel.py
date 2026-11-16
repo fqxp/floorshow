@@ -176,8 +176,13 @@ def test_tag_filter_has_all_and_never_selects_nothing():
     assert vm.filter_scenes(scenes, ids, frozenset(), only_accented=True) == ["a", "c"]
 
 
-def test_accent_colours_match_by_hex():
+def test_accent_colours_are_the_rgb_mixes_at_off_half_and_full_without_black():
+    import itertools
+
+    colors = [c for _, c in vm.ACCENT_COLORS]
+    want = {"#" + "".join(f"{v:02x}" for v in rgb) for rgb in itertools.product((0, 127, 255), repeat=3)} - {"#000000"}
+    assert len(colors) == 26 and set(colors) == want
+    assert len({n for n, _ in vm.ACCENT_COLORS}) == 26  # every one has its own name
     assert vm.rgb_to_hex((1.0, 0.5333, 0.0)) == "#ff8800"
-    named = [("Warm", "#FF8800"), ("Ice", "#88ccff")]
-    assert vm.accent_index(named, (1.0, 0.5333, 0.0)) == 0
-    assert vm.accent_index(named, (0.1, 0.2, 0.3)) is None
+    assert vm.accent_name("#FF00FF") == "Magenta" and vm.accent_name("#7f007f") == "Dim magenta" and vm.accent_name("#7f7f7f") == "Dim white"
+    assert vm.accent_name("#ff8800") == "#ff8800"

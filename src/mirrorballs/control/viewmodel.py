@@ -185,10 +185,26 @@ def rgb_to_hex(rgb: Any) -> str:
     return "#" + "".join(f"{round(max(0.0, min(1.0, float(c))) * 255):02x}" for c in rgb)
 
 
-def accent_index(names_colors: list[tuple[str, str]], rgb: Any) -> int | None:
-    """Index of the named accent colour equal to ``rgb`` (to 8 bits), or None for a free colour."""
-    want = rgb_to_hex(rgb)
-    return next((i for i, (_, c) in enumerate(names_colors) if c.lower() == want), None)
+# The accent colours on offer: every mix of red, green and blue at 0, half and full, black excepted. In
+# rows of ACCENT_COLUMNS, hue aligned by column: the full hues, the hues halfway between them, pale, dim,
+# white. They are lights, so the names say hue, paleness and intensity, not paint ("dim", never "dark").
+ACCENT_COLUMNS = 6
+ACCENT_COLORS = [
+    ("Red", "#ff0000"), ("Yellow", "#ffff00"), ("Green", "#00ff00"),
+    ("Cyan", "#00ffff"), ("Blue", "#0000ff"), ("Magenta", "#ff00ff"),
+    ("Orange", "#ff7f00"), ("Yellow-green", "#7fff00"), ("Green-cyan", "#00ff7f"),
+    ("Cyan-blue", "#007fff"), ("Violet", "#7f00ff"), ("Magenta-red", "#ff007f"),
+    ("Pale red", "#ff7f7f"), ("Pale yellow", "#ffff7f"), ("Pale green", "#7fff7f"),
+    ("Pale cyan", "#7fffff"), ("Pale blue", "#7f7fff"), ("Pale magenta", "#ff7fff"),
+    ("Dim red", "#7f0000"), ("Dim yellow", "#7f7f00"), ("Dim green", "#007f00"),
+    ("Dim cyan", "#007f7f"), ("Dim blue", "#00007f"), ("Dim magenta", "#7f007f"),
+    ("White", "#ffffff"), ("Dim white", "#7f7f7f"),
+]
+
+
+def accent_name(color: str) -> str:
+    """The name of ``color`` ("#rrggbb") among ACCENT_COLORS, or the hex itself for any other colour."""
+    return next((n for n, c in ACCENT_COLORS if c == color.lower()), color.lower())
 
 
 def display_name(scene_id: str) -> str:

@@ -343,43 +343,19 @@ def test_only_accented_shows_the_scenes_that_use_the_accent(win, tmp_path):
     assert w.visible_ids() == ["gamma"] and "Gamma" in texts(w.grid) and "Alpha" not in texts(w.grid)
 
 
-def test_accent_selector_sends_and_saves(win):
+def test_the_accent_is_picked_from_the_offered_colours(win):
     w, fake = win
-    w.store.update({"accent": {"colors": [{"name": "Warm", "color": "#ff8800"}, {"name": "Ice", "color": "#88ccff"}]}})
-    w.accent_colors_changed()
     w.set_connection(True)
     w.apply_state(st(accent=[1.0, 1.0, 1.0]))
-    model = w.accent_dd.get_model()
-    assert [model.get_string(i) for i in range(model.get_n_items())] == ["Warm", "Ice", "Custom"]
-    w.accent_dd.set_selected(1)
-    pump(50)
-    assert fake.sent[-1] == ("accent.set", {"color": [0.5333, 0.8, 1.0]}) and w.store.load().accent.color == "#88ccff"
-    w.apply_state(st(accent=[0.5333, 0.8, 1.0]))
-    assert w.accent_dd.get_model().get_n_items() == 2 and w.accent_dd.get_selected() == 1  # a named one: no "Custom"
-    rgba = Gdk.RGBA()
-    rgba.parse("#102030")
-    w.accent_btn.set_rgba(rgba)  # the free colour
-    pump(50)
-    assert fake.sent[-1][0] == "accent.set" and w.store.load().accent.color == "#102030"
-    assert w.accent_dd.get_selected() == 2  # "Custom"
-
-
-def test_accent_colors_dialog_adds_renames_and_deletes(win):
-    w, _ = win
-    w.open_accent_colors()
-    d = w.accent_dialog
-    d.add_color()
-    d.add_color()
-    assert [c.name for c in w.store.load().accent.colors] == ["Color 1", "Color 2"]
-    d._rename(d.colors[0], "Warm")
-    d._save_now()
-    assert w.store.load().accent.colors[0].name == "Warm"
-    d.delete_color(d.colors[1])
-    assert [c.name for c in w.store.load().accent.colors] == ["Warm"]
-    model = w.accent_dd.get_model()
-    assert model.get_string(0) == "Warm"
-    d.close()
-    assert w.accent_dialog is None
+    assert list(w.accent_choices) == [c for _, c in vm.ACCENT_COLORS] and len(w.accent_choices) == 26
+    assert w.accent_label.get_text() == "White" and w.accent_choices["#ffffff"].has_css_class("chosen")
+    w.accent_choices["#00ffff"].emit("clicked")
+    assert fake.sent[-1] == ("accent.set", {"color": [0.0, 1.0, 1.0]}) and w.store.load().accent.color == "#00ffff"
+    assert w.accent_label.get_text() == "Cyan" and w.accent_swatch.color == "#00ffff"
+    assert w.accent_choices["#00ffff"].has_css_class("chosen") and not w.accent_choices["#ffffff"].has_css_class("chosen")
+    w.apply_state(st(accent=[1.0, 1.0, 1.0]))  # a stale state does not snap it back
+    assert w.accent_label.get_text() == "Cyan"
+    assert w.lookup_action("accent-colors") is None
 
 
 def test_countdown_bar_shrinks_towards_the_next_automatic_change(win):

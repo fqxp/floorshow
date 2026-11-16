@@ -20,8 +20,8 @@ dark. One operator runs the show from a laptop while the projector shows only th
 - **Live controls.** Brightness, blackout, a trail that fades out whatever disappears, and scene
   parameters. MIDI notes, program changes or CC messages can trigger scene actions. Ctrl+Space starts and
   stops the show.
-- **Accent colour.** One colour for the whole show, picked from named colours (menu › Accent colors…) or
-  freely in the Main box. Scenes that use `accent` follow it.
+- **Accent colour.** One colour for the whole show, picked in the Main box from every mix of red, green
+  and blue at off, half and full. Scenes that use `accent` follow it.
 - **Scene filter.** Tag chips above the scene cards narrow them down; "Only accented" shows only the
   scenes that follow the accent colour.
 - **Calibration wizard.** Records the ball's size and tile layout, its silhouette in the projector image,

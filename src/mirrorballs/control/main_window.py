@@ -95,6 +95,34 @@ class BeatTile(Gtk.DrawingArea):
         cr.fill()
 
 
+class Swatch(Gtk.DrawingArea):
+    """A rounded square of one colour, for the accent picker. Its size is in the stylesheet (em)."""
+
+    def __init__(self, color: str = "#ffffff") -> None:
+        super().__init__()
+        self.add_css_class("swatch")
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_halign(Gtk.Align.CENTER)
+        self.color = color
+        self.set_draw_func(self._draw)
+
+    def set_color(self, color: str) -> None:
+        if color != self.color:
+            self.color = color
+            self.queue_draw()
+
+    def _draw(self, _area: Gtk.DrawingArea, cr: Any, w: int, h: int) -> None:
+        rad = min(w, h) / 4
+        cr.new_sub_path()
+        cr.arc(w - rad, rad, rad, -math.pi / 2, 0)
+        cr.arc(w - rad, h - rad, rad, 0, math.pi / 2)
+        cr.arc(rad, h - rad, rad, math.pi / 2, math.pi)
+        cr.arc(rad, rad, rad, math.pi, 3 * math.pi / 2)
+        cr.close_path()
+        cr.set_source_rgb(*tokens.hex_to_rgb(self.color))
+        cr.fill()
+
+
 class CountdownBar(Gtk.DrawingArea):
     """Thin bar for the time left until the next automatic scene change. It shrinks towards the right
     and is empty (the ground colour) at the moment the transition starts."""
@@ -154,7 +182,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._tags_key: tuple | None = None
         self._tag_filter: frozenset[str] = frozenset()  # empty = All
         self._tag_buttons: dict[str | None, Gtk.ToggleButton] = {}  # None = All
-        self._accent_key: tuple | None = None
         self._accent_hold = 0.0
         self._accent_target = "#ffffff"
         self._params_key: tuple | None = None
@@ -178,7 +205,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._escapes: list[float] = []  # recent Escape presses (the panic blackout)
         self.preferences_dialog: Any = None
         self.scenes_dialog: Any = None
-        self.accent_dialog: Any = None
         self.calibration_window: Any = None
 
         cfg = store.load()
@@ -208,7 +234,6 @@ class MainWindow(Adw.ApplicationWindow):
         header.set_title_widget(label("Mirrorballs", "title-label"))
         menu = Gio.Menu()
         menu.append("Scenes…", "win.scenes")
-        menu.append("Accent colors…", "win.accent-colors")
         menu.append("Calibration…", "win.calibration")
         menu.append("Preferences…", "win.preferences")
         menu.append("Quit renderer", "win.quit-renderer")
@@ -419,15 +444,24 @@ class MainWindow(Adw.ApplicationWindow):
         return panel
 
     def _build_master_panel(self) -> Gtk.Widget:
-        self.accent_dd = Gtk.DropDown.new_from_strings([])
-        self.accent_dd.add_css_class("mb-dd")
-        self.accent_dd.set_hexpand(True)
-        self.accent_dd.set_tooltip_text("Scenes that use the accent color follow it. Name colors in Accent colors…")
-        self.accent_dd.connect("notify::selected", self._on_accent_picked)
-        self.accent_btn = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False), valign=Gtk.Align.CENTER)
-        self.accent_btn.add_css_class("accent-swatch")
-        self.accent_btn.set_tooltip_text("Any accent color")
-        self.accent_btn.connect("notify::rgba", self._on_accent_free)
+        # One button showing the accent; it opens the colours to pick from.
+        self.accent_swatch = Swatch()
+        self.accent_swatch.add_css_class("current")
+        self.accent_label = label("")
+        self.accent_btn = Gtk.MenuButton(hexpand=True)
+        self.accent_btn.add_css_class("accent-btn")
+        self.accent_btn.set_child(hbox(8, self.accent_swatch, self.accent_label))
+        self.accent_btn.set_tooltip_text("Scenes that use the accent color follow it")
+        self.accent_choices: dict[str, Gtk.Button] = {}
+        grid = Gtk.Grid(column_spacing=6, row_spacing=6)
+        for i, (name, color) in enumerate(vm.ACCENT_COLORS):
+            b = Gtk.Button(child=Swatch(color), tooltip_text=name)
+            b.add_css_class("swatch-choice")
+            b.connect("clicked", lambda _b, color=color: self._on_accent_chosen(color))
+            grid.attach(b, i % vm.ACCENT_COLUMNS, i // vm.ACCENT_COLUMNS, 1, 1)
+            self.accent_choices[color] = b
+        self.accent_popover = Gtk.Popover(child=grid)
+        self.accent_btn.set_popover(self.accent_popover)
         self.brightness_label = label("85 %", "secondary")
         self.brightness = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
         self.brightness.set_draw_value(False)
@@ -450,7 +484,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._show_trail()
         self.trail.connect("value-changed", self._on_trail_changed)
         panel = vbox(10, label("Main", "panel-title"),
-                     vbox(4, label("Accent"), hbox(8, self.accent_dd, self.accent_btn)),
+                     vbox(4, label("Accent"), self.accent_btn),
                      vbox(4, hbox(0, label("Brightness", hexpand=True), self.brightness_label), self.brightness),
                      vbox(4, hbox(0, label("Trail", hexpand=True), self.trail_label), self.trail),
                      self.blackout_btn)
@@ -518,7 +552,6 @@ class MainWindow(Adw.ApplicationWindow):
         for name, fn in (
             ("preferences", lambda *_: self.open_preferences()),
             ("scenes", lambda *_: self.open_scenes()),
-            ("accent-colors", lambda *_: self.open_accent_colors()),
             ("calibration", lambda *_: self.open_calibration()),
             ("quit", lambda *_: self.close()),
             ("quit-renderer", lambda *_: self.act_quit_renderer()),
@@ -709,13 +742,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.scenes_dialog = ScenesDialog(self)
         self.scenes_dialog.present()
 
-    def open_accent_colors(self) -> None:
-        from .accent_dialog import AccentDialog
-
-        if self.accent_dialog is None:
-            self.accent_dialog = AccentDialog(self)
-        self.accent_dialog.present()
-
     def open_calibration(self) -> None:
         from .calibration import CalibrationWindow
 
@@ -807,55 +833,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.cfg = self.store.load()
         except Exception as e:  # noqa: BLE001
             self.toast(f"Could not save the accent color: {e}")
-        # Not now: this runs inside the dropdown's own notify::selected, and swapping its model there
-        # (a free colour's "Custom" entry comes and goes) frees what the dropdown is still using.
-        GLib.idle_add(self._idle_refresh_accent)
+        self._refresh_accent()
 
-    def _idle_refresh_accent(self) -> bool:
-        self._ui_guard = True
-        try:
-            self._refresh_accent()
-        finally:
-            self._ui_guard = False
-        return False
-
-    def accent_colors_changed(self) -> None:
-        """The accent colours dialog saved the list."""
-        self.cfg = self.store.load()
-        self._ui_guard = True
-        try:
-            self._refresh_accent()
-        finally:
-            self._ui_guard = False
-
-    def _on_accent_picked(self, dd: Gtk.DropDown, *_a: Any) -> None:
-        if self._ui_guard:
-            return
-        colors = self.cfg.accent.colors
-        i = dd.get_selected()
-        if i < len(colors):
-            self.set_accent(colors[i].color)
-
-    def _on_accent_free(self, btn: Gtk.ColorDialogButton, *_a: Any) -> None:
-        if self._ui_guard:
-            return
-        c = btn.get_rgba()
-        self.set_accent(vm.rgb_to_hex((c.red, c.green, c.blue)))
+    def _on_accent_chosen(self, color: str) -> None:
+        self.accent_popover.popdown()
+        self.set_accent(color)
 
     def _refresh_accent(self) -> None:
-        named = [(c.name, c.color) for c in self.cfg.accent.colors]
         current = self.accent_hex()
-        idx = vm.accent_index(named, tokens.hex_to_rgb(current))
-        key = (tuple(named), idx is None)
-        if key != self._accent_key:
-            self._accent_key = key
-            items = [n or "Unnamed" for n, _ in named] + (["Custom"] if idx is None else [])
-            self.accent_dd.set_model(Gtk.StringList.new(items))
-        self.accent_dd.set_selected(len(named) if idx is None else idx)
-        rgba = Gdk.RGBA()
-        rgba.parse(current)
-        if not rgba.equal(self.accent_btn.get_rgba()):
-            self.accent_btn.set_rgba(rgba)
+        self.accent_swatch.set_color(current)
+        self.accent_label.set_text(vm.accent_name(current))
+        for color, b in self.accent_choices.items():
+            set_classes(b, {"chosen": color == current})
 
     def _on_brightness_changed(self, scale: Gtk.Scale) -> None:
         v = scale.get_value()

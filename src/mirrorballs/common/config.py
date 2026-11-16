@@ -151,16 +151,11 @@ def _hex(value: str) -> str:
 HexColor = Annotated[str, AfterValidator(_hex)]  # "#rrggbb"
 
 
-class NamedColor(_Base):
-    name: str
-    color: HexColor
-
-
 class AccentConfig(_Base):
     # The accent colour scenes read as ``accent``. The controller sets it live; this is what the renderer
-    # starts with. ``colors`` are the named ones offered on the main window.
+    # starts with.
     color: HexColor = "#ffffff"
-    colors: list[NamedColor] = []
+    colors: Any | None = None  # named colours were removed; old files that still have them keep loading
 
     def rgb(self) -> tuple[float, float, float]:
         return parse_hex_color(self.color)
