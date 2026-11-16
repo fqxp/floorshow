@@ -151,6 +151,21 @@ layers:
 The first band crossfades red to blue within every beat. The second cycles the whole hue wheel every
 five bars, because `hsv` wraps its hue at 1.
 
+A scene doesn't have to choose its colour at all. `accent` is the show's accent colour, picked live in
+the controller's Main box:
+
+```yaml
+schema: 1
+name: Accent band
+tags: [calm]
+layers:
+  - {type: band, lat: 0, width: 30, color: accent}
+  - {type: band, lat: 0, width: 6, color: "mix(accent, white, 1 - phase)"}
+```
+
+Scenes like this one switch colour together when the operator picks a new accent, and the controller's
+"Only accented" filter shows exactly the scenes that use `accent` somewhere.
+
 `alpha` fades a layer in and out. `smoothstep(a, b, x)` is the tool for that — it is 0 below `a`,
 1 above `b` and a smooth ramp between:
 

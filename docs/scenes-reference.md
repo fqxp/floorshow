@@ -45,7 +45,7 @@ layers: [...]          # required
 | `schema` | int | — | File format version. Must be `1`. |
 | `name` | string | — | Display name. |
 | `description` | string | `""` | Free text. |
-| `tags` | list of strings | `[]` | Labels shown on the scene card. |
+| `tags` | list of strings | `[]` | Labels shown on the scene card. The controller's tag filter offers every tag any scene has. |
 | `tempo.beats_per_bar` | 1..16 | clock's value | Overrides the clock's bar length **for this scene**, which changes `bar`. |
 | `params` | map | `{}` | Live controls, see [Parameters](#parameters). |
 | `assets` | map | `{}` | Texture files, see [Textures](#textures). |
@@ -135,6 +135,7 @@ and shows up in the controller rather than stopping the show.
 | `bpm` | The current tempo. |
 | `trans` | `0` → `1` while this scene is entering, `1` afterwards. |
 | `tile` | Degrees of latitude per tile row. `4` until the rows are calibrated. |
+| `accent` | The show's accent colour, set in the controller's Main box. White until one is picked. A scene that uses it anywhere counts as *accented* for the "Only accented" filter. |
 | `i` | Index within `repeat`, `0` .. `n-1`. In a layer without `repeat` it is `0`. |
 | `n` | The layer's `repeat` count. `1` without `repeat`. |
 | `param.<name>` | A declared parameter's current value. |
@@ -175,6 +176,8 @@ color: "#ff8800"                  # quoted: # starts a YAML comment
 color: [1.0, 0.53, 0.0]           # r, g, b, each 0..1
 color: "hsv(beat * 0.1, 1, 1)"    # an expression returning a colour
 ```
+
+`color: accent` (or any expression using `accent`) follows the show's accent colour.
 
 A `[r, g, b]` list must stay within 0..1. An expression may return larger values, which survive
 blending and are only clamped when the finished pixel is written — so an over-1 colour still shows
