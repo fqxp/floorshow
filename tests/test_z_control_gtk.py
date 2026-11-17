@@ -1422,29 +1422,47 @@ def test_levels_move_without_refreshing_the_window(win):
     assert meter.levels == (-8.0, -10.0)
 
 
-def test_switching_to_a_source_without_a_beat_says_so(win):
+IDLE_AUDIO = {"running": False, "error": None, "source": None, "wanted": "alsa_output.speakers", "sources": [],
+              "tracking": None, "health": None, "throttled": False, "previewing": True}
+
+
+def test_switching_to_audio_says_what_it_listens_to_and_later_whether_there_is_a_beat(win):
     w, _ = win
     shown = toasts_of(w)
-    w.store.update({"clock": {"audio_source": "alsa_output.speakers"}})
+    w.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
     w.cfg = w.store.load()
     w.set_connection(True)
-    w.apply_state(st(audio=audio_state(locked=False)))
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state()))  # the name is seen once
+    w.store.update({"clock": {"source": "internal"}})
+    w.cfg = w.store.load()
+    w.apply_state(st(audio=IDLE_AUDIO))  # another clock: nothing listens
+    w._clock_hold = 0.0
+    w.apply_state(st(audio=IDLE_AUDIO))
     w.clock_seg.buttons["audio"].set_active(True)
     assert w.store.load().clock.source == "audio"
-    assert shown[-1] == "Audio clock · Monitor of Speakers has no beat yet: holding 120 BPM"
+    assert shown[-1] == "Audio clock · listening to Monitor of Speakers (holding 120 BPM until the beat is found)"
+    w.apply_state(st(clock=dict(st()["clock"], source="audio", locked=False), audio=audio_state(locked=False)))
+    w._check_beat(None)  # what the timer does a few seconds later
+    assert shown[-1] == "No beat found on Monitor of Speakers so far"
 
 
 def test_the_hover_over_audio_shows_the_chosen_sources_tempo(win):
     w, _ = win
-    w.store.update({"clock": {"audio_source": "alsa_output.speakers"}})
+    w.store.update({"clock": {"source": "audio", "audio_source": "alsa_output.speakers"}})
     w.cfg = w.store.load()
     w.set_connection(True)
-    w.apply_state(st(audio=audio_state()))
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state()))
     w.audio_hover.show_now()
     pump(50)
     assert w.audio_hover.visible and w.audio_hover.text.get_text() == "Monitor of Speakers · 124.3 BPM"
-    w.apply_state(st(audio=audio_state(locked=False)))
+    w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(locked=False)))
     assert w.audio_hover.text.get_text() == "Monitor of Speakers · no beat yet"
+    # under another clock nothing listens: the hover names the source it would listen to
+    w.store.update({"clock": {"source": "internal"}})
+    w.cfg = w.store.load()
+    w._clock_hold = 0.0
+    w.apply_state(st(audio=IDLE_AUDIO))
+    assert w.audio_hover.text.get_text() == "Audio · Monitor of Speakers · listened to while the audio clock runs"
     w.audio_hover.hide()
     pump(50)
     assert not w.audio_hover.visible

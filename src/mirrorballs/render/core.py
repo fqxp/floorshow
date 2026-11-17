@@ -188,6 +188,8 @@ class Core:
                 self.clock.use_audio(now)
             else:
                 self.clock.use_internal(c.bpm, now)
+            if c.source != "audio":
+                self.audio.forget()  # the listener is stopped: its sources, levels and tempo no longer hold
         self._applied_clock = c
 
     def output_state(self, now: float) -> dict[str, Any]:
@@ -233,6 +235,8 @@ class Core:
 
     def on_audio(self, msg: dict[str, Any], now: float) -> None:
         """One message from mirrorballs-listen. Estimates of the chosen source drive the audio clock."""
+        if self.config.clock.source != "audio":
+            return  # still in the inbox from a listener that has been stopped since
         est = self.audio.on_message(msg, now)
         c = self.config.clock
         if est is not None and self.clock.source == "audio" and est.get("source") == self.audio.resolve(c.audio_source):

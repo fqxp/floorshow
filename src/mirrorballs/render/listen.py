@@ -2,8 +2,9 @@
 into the inbox as ``("audio", msg)``.
 
 The listener is its own process so that its analysis never competes with the frame loop for Python's GIL, and so
-that a broken audio stack cannot take the show down. It is started when the core wants it (the audio clock drives the
-show, or a controller previews sources), stopped when nobody does, and restarted with a growing pause when it dies.
+that a broken audio stack cannot take the show down. It runs only while the audio clock drives the show: it is
+started when the clock switches to audio, ended (and waited for) when it switches to anything else, and restarted
+with a growing pause when it dies.
 Its stderr goes to the renderer's log; its last line is the error shown when it keeps failing.
 """
 
@@ -110,17 +111,27 @@ class ListenManager:
             pass  # it died; poll() notices and restarts it
 
     def _stop(self) -> None:
+        """End the listener for good: end of input (it quits by itself), then SIGTERM, then SIGKILL, each time
+        waiting for it, so no process (and no zombie) is left behind."""
         proc, self._proc = self._proc, None
         self._sent = None
         if proc is None:
             return
         try:
             assert proc.stdin is not None
-            proc.stdin.close()  # end of input: the listener quits
-            proc.wait(STOP_WAIT_S)
-        except (subprocess.TimeoutExpired, OSError, ValueError):
-            proc.kill()
-        log.info("mirrorballs-listen stopped")
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        for signal_it in (lambda: None, proc.terminate, proc.kill):
+            try:
+                signal_it()
+                proc.wait(STOP_WAIT_S)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+            except OSError:
+                break
+        log.info("mirrorballs-listen stopped (exit %s)", proc.returncode)
 
     def _read_stdout(self, proc: subprocess.Popen) -> None:
         assert proc.stdout is not None

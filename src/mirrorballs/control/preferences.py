@@ -469,7 +469,8 @@ class PreferencesDialog(Adw.Window):
         if key != self._audio_key:
             self._audio_key = key
             self._fill_audio_sources(audio.get("sources") or [])
-        hover, _ = sm.hover_text(audio, self.cfg.clock.audio_source)
+        hover, _ = sm.hover_text(audio, self.cfg.clock.audio_source, state["clock"]["source"] == "audio",
+                                 self.main._audio_name())
         if self.audio_status.get_text() != hover:
             self.audio_status.set_text(hover)
         self._rebuild_mappings_if_connection_changed()

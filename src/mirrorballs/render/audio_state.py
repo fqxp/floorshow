@@ -2,8 +2,9 @@
 chosen source, and who wants previews. Pure (no process, no I/O), so the core and its tests can use it directly.
 
 The chosen source comes from ``clock.audio_source``: a node name, matched exactly first, else as a substring of a
-source's id or name (like the MIDI port). It is tracked while the audio clock drives the show, and also while a
-client previews, so the tempo of a source shows before the show is switched to it.
+source's id or name (like the MIDI port). The listener runs only while the audio clock drives the show: then the
+chosen source is tracked, and while a client previews the other sources are metered too. Under any other clock
+nothing listens, and what the listener said last is forgotten.
 """
 
 from __future__ import annotations
@@ -43,14 +44,19 @@ class AudioState:
 
     def wants(self, clock_source: str, audio_source: str | None, min_bpm: float, max_bpm: float
               ) -> tuple[str | None, bool, float, float] | None:
-        """What the listener should do: (tracked source id, meter the others, tempo range), or None when the
-        listener is not needed at all. While the chosen source is unknown (the listener has not said yet, or it is
-        unplugged) the substring stands in for it, so the listener starts and reports its sources."""
-        needed = clock_source == "audio" or self.previewing
-        if not needed:
+        """What the listener should do: (tracked source id, meter the others, tempo range), or None when it is not to
+        run: whenever another clock drives the show, previews or not. While the chosen source is unknown (the
+        listener has not said yet, or it is unplugged) the substring stands in for it, so the listener starts and
+        reports its sources."""
+        if clock_source != "audio":
             return None
         active = self.resolve(audio_source) or audio_source
         return active, self.previewing, min_bpm, max_bpm
+
+    def forget(self) -> None:
+        """The listener stopped: nothing it said holds any more."""
+        self.sources, self.levels, self.estimate, self.health = [], {}, None, None
+        self.throttled, self.error = False, None
 
     # --- messages from the listener -----------------------------------------------------------
 

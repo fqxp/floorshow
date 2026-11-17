@@ -42,18 +42,29 @@ def test_the_hover_says_whether_the_chosen_source_has_a_beat():
     assert sm.hover_text(audio(), "out") == ("Monitor of Speakers · 124.3 BPM", audio()["tracking"])
     assert sm.hover_text(audio(locked=False), "out") == ("Monitor of Speakers · no beat yet", None)
     assert sm.hover_text(audio(out_db=-90), "out")[0] == "Monitor of Speakers · silent"
-    assert "no source chosen" in sm.hover_text(audio(source=None, wanted=None), None)[0]
     assert sm.hover_text(audio(source=None, wanted="hdmi"), "hdmi")[0] == "Audio · hdmi is not there"
     assert sm.hover_text(audio(error="no GStreamer", running=False), "out")[0].startswith("Audio is not available")
+    assert sm.hover_text(audio(running=False), "out", cfg_name="Monitor of Speakers")[0] == \
+        "Audio · starting to listen to Monitor of Speakers…"
     assert "not running" in sm.hover_text(None, "out")[0]
 
 
-def test_switching_to_audio_says_what_there_is():
-    assert sm.audio_switch_toast(audio(), "out", 120) == "Audio clock · Monitor of Speakers · 124.3 BPM"
-    assert sm.audio_switch_toast(audio(locked=False), "out", 120) == \
-        "Audio clock · Monitor of Speakers has no beat yet: holding 120 BPM"
-    assert sm.audio_switch_toast(audio(out_db=-90), "out", 118) == "Audio clock · Monitor of Speakers · silent: holding 118 BPM"
-    assert sm.audio_switch_toast(audio(source=None, wanted=None), None, 120) == "Audio clock · pick a source below"
+def test_under_another_clock_the_hover_only_names_the_source():
+    idle = {"running": False, "error": None, "source": None, "sources": [], "tracking": None}
+    assert sm.hover_text(idle, "out", active=False, cfg_name="Monitor of Speakers") == \
+        ("Audio · Monitor of Speakers · listened to while the audio clock runs", None)
+    assert sm.hover_text(idle, "out", active=False)[0] == "Audio · out · listened to while the audio clock runs"
+    assert "no source chosen" in sm.hover_text(idle, None, active=False)[0]
+
+
+def test_switching_to_audio_says_what_it_listens_to():
+    assert sm.audio_switch_toast("out", "Monitor of Speakers", 120) == \
+        "Audio clock · listening to Monitor of Speakers (holding 120 BPM until the beat is found)"
+    assert sm.audio_switch_toast(None, None, 120) == "Audio clock · choose a source beside Downbeat"
+    # a few seconds later, whatever source it listens to
+    assert sm.no_beat_toast(audio(locked=False), None) == "No beat found on Monitor of Speakers so far"
+    assert sm.no_beat_toast(audio(out_db=-90, locked=False), None) == "Monitor of Speakers is silent"
+    assert sm.no_beat_toast(audio(), None) is None
 
 
 def test_picking_toasts():

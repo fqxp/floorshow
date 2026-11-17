@@ -206,6 +206,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._clock_target = "internal"
         self._midi_previewing = False  # midi.preview is on (only while the MIDI picker shows: it opens every port)
         self._no_beat_timer = 0
+        self._audio_names: dict[str, str] = {}  # audio source id -> name, as last listed (kept while nothing listens)
         self._view_key: str | None = None
         self._library_check = 0.0
         self._restart_pending = False
@@ -670,8 +671,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast(f"MIDI clock · {self.cfg.clock.midi_port}" if self.cfg.clock.midi_port
                        else "MIDI clock · pick a port below")
         else:
+            # the listener starts only now: whether there is a beat is said once it had time to find one
             holding = st["clock"]["bpm"] if st else self.cfg.clock.bpm
-            self.toast(sm.audio_switch_toast(st.get("audio") if st else None, self.cfg.clock.audio_source, holding))
+            self.toast(sm.audio_switch_toast(self.cfg.clock.audio_source, self._audio_name(), holding))
+            self._schedule_beat_check(None)
         self._refresh_clock(st)
 
     def toggle_clock_source(self) -> None:
@@ -692,7 +695,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _audio_hover_text(self) -> tuple[str, dict[str, Any] | None]:
         st = self.state if self.connected else None
-        return sm.hover_text(st.get("audio") if st else None, self.cfg.clock.audio_source)
+        active = bool(st) and st["clock"]["source"] == "audio"
+        return sm.hover_text(st.get("audio") if st else None, self.cfg.clock.audio_source, active, self._audio_name())
+
+    def _audio_name(self) -> str | None:
+        """The configured source's name as last seen (the listener, and so its list, only runs with the audio
+        clock), or None."""
+        sid = self.cfg.clock.audio_source
+        return self._audio_names.get(sid) if sid else None
+
+    def _schedule_beat_check(self, sid: str | None) -> None:
+        if self._no_beat_timer:
+            GLib.source_remove(self._no_beat_timer)
+        self._no_beat_timer = GLib.timeout_add(NO_BEAT_CHECK_MS, self._check_beat, sid)
 
     def _pick_audio(self, sid: str) -> None:
         """A chip in the audio picker: listen to that source from now on."""
@@ -708,11 +723,9 @@ class MainWindow(Adw.ApplicationWindow):
         items = {i.id: i for i in sm.audio_items((self.state or {}).get("audio"))}
         item = items.get(sid)
         self.toast(sm.audio_pick_toast(item, item.name if item else sid))
-        if self._no_beat_timer:
-            GLib.source_remove(self._no_beat_timer)
-        self._no_beat_timer = GLib.timeout_add(NO_BEAT_CHECK_MS, self._check_beat, sid)
+        self._schedule_beat_check(sid)
 
-    def _check_beat(self, sid: str) -> bool:
+    def _check_beat(self, sid: str | None) -> bool:
         self._no_beat_timer = 0
         st = self.state if self.connected else None
         text = sm.no_beat_toast(st.get("audio") if st else None, sid)
@@ -753,6 +766,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         guard, self._ui_guard = self._ui_guard, True  # restored after: refresh() calls this with the guard already up
         try:
+            for s in (st.get("audio") or {}).get("sources") or []:
+                self._audio_names[s["id"]] = s["name"]
             if shown == "audio":
                 audio = st.get("audio")
                 items = sm.audio_items(audio)

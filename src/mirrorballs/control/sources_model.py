@@ -101,13 +101,22 @@ def items_key(items: list[Item]) -> str:
     return json.dumps([(i.id, i.name, i.kind) for i in items])
 
 
-def hover_text(audio: dict[str, Any] | None, cfg_source: str | None) -> tuple[str, dict[str, Any] | None]:
-    """(text, tracking or None) for the popover over the Audio option: the chosen source and whether it has a beat,
-    so it is clear before switching."""
+def hover_text(audio: dict[str, Any] | None, cfg_source: str | None, active: bool = True,
+               cfg_name: str | None = None) -> tuple[str, dict[str, Any] | None]:
+    """(text, tracking or None) for the popover over the Audio option: the chosen source and whether it has a beat.
+
+    The listener only runs while the audio clock drives the show (``active``); under another clock the popover just
+    names the source that would be listened to (``cfg_name``: its name, if the window has seen it)."""
     if audio is None:
         return "Audio · the renderer is not running", None
+    if not active:
+        if not cfg_source:
+            return "Audio · no source chosen yet: switch to Audio and choose one", None
+        return f"Audio · {cfg_name or cfg_source} · listened to while the audio clock runs", None
     if audio.get("error") and not audio.get("running"):
         return f"Audio is not available: {audio['error']}", None
+    if not audio.get("running"):
+        return f"Audio · starting to listen to {cfg_name or cfg_source or 'audio'}…", None
     chosen = audio.get("source")
     if not chosen:
         if cfg_source:
@@ -123,18 +132,12 @@ def hover_text(audio: dict[str, Any] | None, cfg_source: str | None) -> tuple[st
     return f"{name} · no beat yet", None
 
 
-def audio_switch_toast(audio: dict[str, Any] | None, cfg_source: str | None, holding_bpm: float) -> str:
-    """The toast when the show is switched to the audio clock."""
-    text, tracking = hover_text(audio, cfg_source)
-    if audio is not None and not audio.get("source"):
-        return "Audio clock · pick a source below" if not cfg_source else f"Audio clock · {cfg_source} is not there"
-    if tracking:
-        return f"Audio clock · {text}"
-    if text.endswith("silent"):
-        return f"Audio clock · {text}: holding {holding_bpm:.0f} BPM"
-    if text.endswith("no beat yet"):
-        return f"Audio clock · {text[: -len(' · no beat yet')]} has no beat yet: holding {holding_bpm:.0f} BPM"
-    return f"Audio clock · {text}"
+def audio_switch_toast(cfg_source: str | None, cfg_name: str | None, holding_bpm: float) -> str:
+    """The toast when the show is switched to the audio clock. The listener only starts now, so whether there is a
+    beat is said a few seconds later (``no_beat_toast``)."""
+    if not cfg_source:
+        return "Audio clock · choose a source beside Downbeat"
+    return f"Audio clock · listening to {cfg_name or cfg_source} (holding {holding_bpm:.0f} BPM until the beat is found)"
 
 
 def audio_pick_toast(item: Item | None, name: str) -> str:
@@ -143,14 +146,19 @@ def audio_pick_toast(item: Item | None, name: str) -> str:
     return f"Audio · {name}"
 
 
-def no_beat_toast(audio: dict[str, Any] | None, sid: str) -> str | None:
-    """Some seconds after a source was picked: say so when it still has no beat (None when it has one, or another
-    source was picked meanwhile)."""
-    if not audio or audio.get("source") != sid:
+def no_beat_toast(audio: dict[str, Any] | None, sid: str | None) -> str | None:
+    """Some seconds after a source was picked (``sid``) or the audio clock was switched on (``sid`` None: whatever
+    source it listens to): say so when there is still no beat. None when there is one, or another source was picked
+    meanwhile."""
+    if not audio or not audio.get("source") or (sid is not None and audio.get("source") != sid):
         return None
+    sid = audio["source"]
     tracking = audio.get("tracking")
     if tracking and tracking["locked"]:
         return None
+    level = next((loudest(s.get("rms_db") or []) for s in audio.get("sources") or [] if s["id"] == sid), None)
+    if level is not None and level < SILENT_DB:
+        return f"{_name(audio, sid)} is silent"
     return f"No beat found on {_name(audio, sid)} so far"
 
 

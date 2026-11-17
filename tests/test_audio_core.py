@@ -44,16 +44,17 @@ def test_the_chosen_source_is_matched_exactly_then_as_a_substring():
     assert a.resolve("hdmi") is None and a.resolve(None) is None
 
 
-def test_the_listener_is_needed_for_the_audio_clock_or_previews():
+def test_the_listener_runs_only_for_the_audio_clock():
     a = AudioState()
     assert a.wants("internal", "speakers", 70, 180) is None
     assert a.wants("audio", "speakers", 70, 180) == ("speakers", False, 70, 180)  # unknown yet: the substring
     a.on_message({"type": "sources", "sources": SOURCES}, 0.0)
     assert a.wants("audio", "speakers", 70, 180) == ("alsa_output.speakers", False, 70, 180)
     a.preview("c1", True)
-    assert a.wants("midi", "speakers", 70, 180) == ("alsa_output.speakers", True, 70, 180)  # tempo before switching
-    a.preview("c1", False)
-    assert a.wants("midi", "speakers", 70, 180) is None
+    assert a.wants("audio", "speakers", 70, 180) == ("alsa_output.speakers", True, 70, 180)  # and meters the others
+    assert a.wants("midi", "speakers", 70, 180) is None  # a preview alone never starts it
+    a.forget()
+    assert a.sources == [] and a.estimate is None
 
 
 def test_state_shows_levels_and_tracking_while_fresh():
@@ -118,12 +119,26 @@ def test_estimates_of_another_source_do_not_move_the_clock(tmp_path):
 
 
 def test_previews_are_per_client_and_end_with_the_connection(tmp_path):
-    core = make_core(tmp_path, "clock: {source: internal, audio_source: speakers}\n")
-    assert core.audio_wants() is None
+    core = make_core(tmp_path, "clock: {source: audio, audio_source: speakers}\n")
+    assert core.audio_wants() == ("speakers", False, 70.0, 180.0)
     assert core.handle(P.parse_command({"cmd": "audio.preview", "on": True}), "c1", 100.0)["ok"]
     assert core.audio_wants() == ("speakers", True, 70.0, 180.0)
     core.client_disconnected("c1", 100.0)
-    assert core.audio_wants() is None
+    assert core.audio_wants() == ("speakers", False, 70.0, 180.0)
+
+
+def test_another_clock_stops_the_listener_and_forgets_what_it_said(tmp_path):
+    core = make_core(tmp_path, "clock: {source: audio, audio_source: speakers}\n")
+    core.handle(P.parse_command({"cmd": "audio.preview", "on": True}), "c1", 100.0)
+    core.on_audio({"type": "sources", "sources": SOURCES}, 100.0)
+    core.on_audio(estimate(101.0, 7.25), 101.0)
+    (tmp_path / "config.yaml").write_text("clock: {source: internal, audio_source: speakers}\n")
+    core.reload(102.0)
+    assert core.audio_wants() is None  # a client still previews: no matter
+    st = core.state(102.0)["audio"]
+    assert st["sources"] == [] and st["tracking"] is None
+    core.on_audio({"type": "sources", "sources": SOURCES}, 102.1)  # late, from the stopped listener
+    assert core.state(102.1)["audio"]["sources"] == []
 
 
 def test_the_audio_offset_applies_only_to_the_audio_clock(tmp_path):
@@ -179,6 +194,30 @@ def test_the_listener_starts_when_wanted_and_gets_configured(manager):
     assert m.status() == {"running": True, "error": None}
     m.configure(None)
     assert not m.status()["running"]
+
+
+STUBBORN_LISTENER = textwrap.dedent("""
+    import json, signal, sys, time
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)  # ignores SIGTERM, and the end of its input below
+    print(json.dumps({"type": "sources", "sources": []}), flush=True)
+    sys.stdin.close()
+    while True:
+        time.sleep(1)
+""")
+
+
+@pytest.mark.parametrize("script", [FAKE_LISTENER, STUBBORN_LISTENER], ids=["quits-on-eof", "stubborn"])
+def test_not_wanted_any_more_the_listener_process_is_gone(script):
+    inbox = SimpleQueue()
+    m = ListenManager(inbox, command=[sys.executable, "-c", script])
+    m.configure(("speakers", False, 70.0, 180.0))
+    m.poll(0.0)
+    drain(inbox, 1)
+    proc = m._proc
+    assert proc.poll() is None
+    m.configure(None)  # the clock switched away from audio
+    assert proc.poll() is not None  # ended and reaped (no zombie left)
+    assert not m.status()["running"] and m._proc is None
 
 
 def test_a_listener_that_dies_is_restarted_later_and_its_error_shown(manager):
