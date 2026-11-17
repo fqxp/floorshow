@@ -1,6 +1,7 @@
 """MIDI input ports available to choose from (the controller lists them; the renderer opens them).
 
-Sequencer ports come first, then raw MIDI devices ("VirMIDI 1-0 (raw hw:1,0)")."""
+Sequencer ports come first, then the raw devices of VirMIDI cards ("VirMIDI 1-0 (raw hw:1,0)"); a hardware interface's
+raw device only duplicates its sequencer port and is not offered."""
 
 from __future__ import annotations
 

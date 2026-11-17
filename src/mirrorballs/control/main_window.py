@@ -750,8 +750,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.preferences_dialog.sync_clock_source()
 
     def _set_midi_preview(self, on: bool) -> None:
-        """Every MIDI port is opened while this is on (a raw device then is busy for other programs), so it is only on
-        while the MIDI picker is on screen."""
+        """The renderer opens every MIDI input port while this is on, for nothing but the picker's beat previews, so it
+        is only on while the MIDI picker is on screen."""
         if on != self._midi_previewing and self.connected:
             if self.send("midi.preview", on=on):
                 self._midi_previewing = on

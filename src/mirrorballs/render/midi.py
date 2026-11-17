@@ -8,8 +8,9 @@ scene actions). Callbacks run on rtmidi's thread and only enqueue, stamped with
 
 While a client previews (``configure(..., preview=True)``) every other input port is opened too, with the role
 ``preview``: its messages only feed the beat previews of the port selector. A port that is chosen for a role is
-handed over from the preview (a raw device can only be opened once). A raw device another program holds cannot be
-opened and is reported as busy.
+handed over from the preview, so the renderer never reads a device twice. Raw devices are only listed for VirMIDI
+cards (see common/rawmidi.py), which several programs can open at once; one that cannot be opened all the same is
+reported as busy.
 
 Inbox items: ``("midi", roles, message bytes, time, port name)``.
 """
@@ -67,7 +68,7 @@ class MidiManager:
             return
         self._next_poll = now + POLL_S
         names = self._probe.get_ports()
-        raw = list_raw_ports()
+        raw = list_raw_ports(only_virtual=False)  # a configured port opens even if it is not listed
         for key in list(self._open):
             inp, name = self._open[key]
             gone = not inp.alive if isinstance(inp, RawMidiReader) else name not in names
@@ -91,7 +92,7 @@ class MidiManager:
                 self._close_preview(raw_name)
                 self._open_raw(key, raw_name, raw[raw_name])
         if self._preview:
-            self._poll_preview(names, raw)
+            self._poll_preview(names, list_raw_ports())  # listed raw devices only (VirMIDI)
 
     def _poll_preview(self, names: list[str], raw: dict[str, Any]) -> None:
         in_role = {name for _, name in self._open.values()}

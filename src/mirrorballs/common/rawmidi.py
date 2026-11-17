@@ -1,14 +1,21 @@
 """ALSA raw MIDI devices (``/dev/snd/midiC<card>D<dev>``) as MIDI inputs.
 
 Some setups send MIDI into a virtual raw MIDI card ("VirMIDI"): a program that writes to the sequencer port
-"VirMIDI 1-0" makes the bytes appear on the raw device ``/dev/snd/midiC1D0``, and only there. Sequencer clients
-(rtmidi) cannot subscribe to that, so the renderer reads the device file itself.
+"VirMIDI 1-0" (Mixxx does) makes the bytes appear on the raw device ``/dev/snd/midiC1D0``, and only there. Sequencer
+clients (rtmidi) cannot subscribe to that, so the renderer reads the device file itself. The program never opens the
+raw device, so nothing is shared; and a VirMIDI raw device can be opened by several readers and a writer at once
+(tried on 2026-11-17).
+
+Hardware MIDI interfaces are different: everything they send is on their sequencer port already, and while anything
+uses that port the sequencer holds their raw device, so opening it fails as busy. Their raw devices are therefore only
+duplicates, and they are not listed (``only_virtual``); one that is configured by name still opens.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import select
 import threading
 import time
@@ -22,19 +29,41 @@ ASOUND_DIR = Path("/proc/asound")
 _DATA_LEN = {0x80: 2, 0x90: 2, 0xA0: 2, 0xB0: 2, 0xC0: 1, 0xD0: 1, 0xE0: 2, 0xF1: 1, 0xF2: 2, 0xF3: 1, 0xF6: 0}
 
 
-def list_raw_ports(snd_dir: Path = SND_DIR, asound_dir: Path = ASOUND_DIR) -> dict[str, Path]:
+VIRTUAL_DRIVER = "VirMIDI"
+
+
+def virtual_cards(asound_dir: Path = ASOUND_DIR) -> set[str]:
+    """Numbers of the sound cards whose driver is VirMIDI, from /proc/asound/cards ("1 [VirMIDI ]: VirMIDI - ...").
+    The driver, not the card's id: the id can be renamed with a module option."""
+    try:
+        lines = (asound_dir / "cards").read_text().splitlines()
+    except OSError:
+        return set()
+    out = set()
+    for line in lines:
+        m = re.match(r"\s*(\d+)\s+\[[^\]]*\]:\s*(\S+)", line)
+        if m and m.group(2) == VIRTUAL_DRIVER:
+            out.add(m.group(1))
+    return out
+
+
+def list_raw_ports(snd_dir: Path = SND_DIR, asound_dir: Path = ASOUND_DIR, only_virtual: bool = True) -> dict[str, Path]:
     """Readable raw MIDI devices: display name -> device file. The name has the shape of the sequencer's
-    ("VirMIDI 1-0") plus "(raw hw:1,0)", so it is clear which kind of port it is."""
+    ("VirMIDI 1-0") plus "(raw hw:1,0)", so it is clear which kind of port it is. ``only_virtual``: VirMIDI devices
+    only (the others duplicate their sequencer port; see the module's description)."""
     ports: dict[str, Path] = {}
     try:
         devices = sorted(snd_dir.glob("midiC*D*"))
     except OSError:
         return ports
+    virtual = virtual_cards(asound_dir) if only_virtual else set()
     for dev in devices:
         try:
             card, device = dev.name[len("midiC"):].split("D")
             int(card), int(device)
         except ValueError:
+            continue
+        if only_virtual and card not in virtual:
             continue
         if not os.access(dev, os.R_OK):
             continue
