@@ -21,6 +21,7 @@ from .inhibit import IdleInhibitor
 from .ipc_server import AlreadyRunning, IpcServer
 from .listen import ListenManager
 from .midi import MidiManager
+from .sim import View, projector_dir
 from .watchdog import StallWatchdog, file_dumper, install_signal_dump
 
 log = logging.getLogger("floorshow.render")
@@ -120,9 +121,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     configure_output_window(glfw, window)
 
-    def toggle_fullscreen(win: Any, key: int, _sc: int, action: int, _mods: int) -> None:
-        """F11: fullscreen on the second monitor (normally the projector), or back to a window."""
-        if key != glfw.KEY_F11 or action != glfw.PRESS:
+    def on_key(win: Any, key: int, _sc: int, action: int, _mods: int) -> None:
+        """F11: fullscreen on the second monitor (normally the projector), or back to a window.
+        H: the haze simulation on or off."""
+        if action != glfw.PRESS:
+            return
+        if key == glfw.KEY_H:
+            inbox.put(("simulation.toggle",))
+            return
+        if key != glfw.KEY_F11:
             return
         if glfw.get_window_monitor(win):
             glfw.set_window_monitor(win, None, 100, 100, w, h, 0)
@@ -135,7 +142,40 @@ def main(argv: list[str] | None = None) -> int:
 
     fb = {"size": glfw.get_framebuffer_size(window)}  # kept current by the callback; the render thread must not call GLFW queries
 
-    glfw.set_key_callback(window, toggle_fullscreen)
+    glfw.set_key_callback(window, on_key)
+
+    # The simulation's viewpoint, moved with the mouse: drag to walk round the ball, scroll to step closer,
+    # double-click to go back. Kept as offsets from the default view, which depends on the calibration.
+    orbit = {"dyaw": 0.0, "dpitch": 0.0, "zoom": 1.0}
+    drag: dict[str, Any] = {"at": None, "last_click": 0.0}
+
+    def on_button(win: Any, button: int, action: int, _mods: int) -> None:
+        if button != glfw.MOUSE_BUTTON_LEFT or not core.simulation:
+            return
+        if action == glfw.PRESS:
+            t = time.monotonic()
+            if t - drag["last_click"] < 0.35:
+                orbit.update(dyaw=0.0, dpitch=0.0, zoom=1.0)
+            drag["last_click"] = t
+            drag["at"] = glfw.get_cursor_pos(win)
+        else:
+            drag["at"] = None
+
+    def on_cursor(_win: Any, x: float, y: float) -> None:
+        if drag["at"] is None:
+            return
+        px, py = drag["at"]
+        drag["at"] = (x, y)
+        orbit["dyaw"] -= (x - px) * 0.3
+        orbit["dpitch"] = max(-170.0, min(170.0, orbit["dpitch"] + (y - py) * 0.3))
+
+    def on_scroll(_win: Any, _dx: float, dy: float) -> None:
+        if core.simulation:
+            orbit["zoom"] = max(0.1, min(3.0, orbit["zoom"] * 0.9 ** dy))
+
+    glfw.set_mouse_button_callback(window, on_button)
+    glfw.set_cursor_pos_callback(window, on_cursor)
+    glfw.set_scroll_callback(window, on_scroll)
     glfw.set_framebuffer_size_callback(window, lambda _w, fw, fh: fb.__setitem__("size", (fw, fh)))
     # Window events go to the log, so a window that misbehaves leaves evidence (focus lost? iconified?).
     glfw.set_window_focus_callback(window, lambda _w, focused: log.info("window %s", "focused" if focused else "lost focus"))
@@ -226,6 +266,9 @@ def main(argv: list[str] | None = None) -> int:
                         log.exception("frame evaluation failed")
                         failed_msg = str(e)
                     spec = FrameSpec(cal=core.calibration((fw, fh)), incoming=None, black=True)
+                if spec.sim is not None:
+                    base = View.default(projector_dir(spec.cal.roll_deg, spec.cal.tilt_deg))
+                    spec.sim.view = base.orbit(orbit["dyaw"], orbit["dpitch"]).zoom(orbit["zoom"])
                 draw(pipe, spec, ctx.screen)
                 swap_start = time.monotonic()
                 glfw.swap_buffers(window)
@@ -253,9 +296,14 @@ def main(argv: list[str] | None = None) -> int:
     render.start()
 
     next_probe = 0.0
+    cursor_shown = False
     try:
         while not glfw.window_should_close(window) and not core.quit_requested and not render_failed.is_set():
             glfw.wait_events_timeout(0.05)  # returns at once when an event arrives
+            if core.simulation != cursor_shown:  # the mouse moves the simulation's view; otherwise it stays hidden
+                cursor_shown = core.simulation
+                glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL if cursor_shown else glfw.CURSOR_HIDDEN)
+                drag["at"] = None
             now = time.monotonic()
             if now >= next_probe:
                 next_probe = now + 1.0

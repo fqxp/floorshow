@@ -77,10 +77,10 @@ def pack_shapes(shapes: list[ShapeParams]) -> tuple[bytes, int]:
     return data.tobytes(), n
 
 
-def _source(name: str, with_common: bool = True) -> str:
+def _source(name: str, with_common: bool = True, common: str = "common.glsl") -> str:
     body = (SHADERS / name).read_text()
-    common = (SHADERS / "common.glsl").read_text() if with_common else ""
-    return "#version 330\n" + common + "\n" + body
+    head = (SHADERS / common).read_text() if with_common else ""
+    return "#version 330\n" + head + "\n" + body
 
 
 class GlPipeline:
@@ -108,6 +108,15 @@ class GlPipeline:
         # and leaves a ghost burnt in that never reaches black.
         self.history: list[tuple[moderngl.Texture, moderngl.Framebuffer]] = []
         self._hist = 0
+        self._sim = None  # sim_gl.SimPipeline, made the first time the haze simulation shows
+
+    @property
+    def sim(self):
+        if self._sim is None:
+            from .sim_gl import SimPipeline
+
+            self._sim = SimPipeline(self.ctx)
+        return self._sim
 
     # --- resources -----------------------------------------------------------------------
 

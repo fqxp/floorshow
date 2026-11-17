@@ -33,6 +33,8 @@ def pump(core: Core, inbox: SimpleQueue, ipc: Sender, now: float) -> int:
             core.on_midi(roles, data, t, port[0] if port else None)
         elif kind == "audio":
             core.on_audio(item[1], now)
+        elif kind == "simulation.toggle":  # key H in the output window
+            core.simulation = not core.simulation
         elif kind == "disconnect":
             core.client_disconnected(item[1], now)
         elif kind == "msg":

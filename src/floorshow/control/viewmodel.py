@@ -278,6 +278,8 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
         return ("mode", "sequence")
     if name in ("c", "C"):
         return ("clock-source", None)
+    if name in ("h", "H"):
+        return ("simulation", None)
     if name == "bracketleft":
         return ("step", -1)
     if name == "bracketright":

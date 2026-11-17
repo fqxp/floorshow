@@ -40,8 +40,14 @@ dark. One operator runs the show from a laptop while the projector shows only th
 - **Calibration wizard.** Records the ball's size and tile layout, its silhouette in the projector image,
   its axis (roll and tilt) and its tile rows, then confirms with a turning globe. The calibration remembers
   the output window it was measured in.
+- **Haze simulation.** Key H (in either window) or the menu makes the output window show what the room
+  would look like with haze in the air: the beams each mirror tile throws, the projector's own beam, the
+  ball and faint walls with the spots on them. It uses the calibration and the ball's tile rows and
+  turns at the ball's configured speed. Drag to walk round the ball, scroll to step closer, double-click
+  to go back. Preferences › Simulation sets the haze and what else is shown. For working without the rig;
+  the renderer always starts with it off.
 - **Scriptable.** `floorshow-ctl` controls a running renderer from a shell (scene, mode, master, trail,
-  param, state, watch).
+  sim, param, state, watch).
 - **Robust output.** The renderer holds an idle inhibitor so the screen doesn't blank, and a watchdog
   writes thread stacks when frames stall. The controller shows a banner when that happens.
 

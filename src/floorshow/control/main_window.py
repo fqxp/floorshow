@@ -253,6 +253,9 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Calibration…", "win.calibration")
         menu.append("Preferences…", "win.preferences")
         menu.append("Quit renderer", "win.quit-renderer")
+        sim = Gio.Menu()
+        sim.append("Haze simulation", "win.simulation")  # a check item: the action has a boolean state
+        menu.append_section(None, sim)
         section = Gio.Menu()
         section.append("Keyboard shortcuts", "win.shortcuts")
         section.append("About Floorshow", "win.about")
@@ -574,6 +577,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.close()  # asks about the renderer first if the show is live
         elif action == "clock-source":
             self.toggle_clock_source()
+        elif action == "simulation":
+            self.win_action("simulation")
 
     def _register_actions(self) -> None:
         for name, fn in (
@@ -588,6 +593,11 @@ class MainWindow(Adw.ApplicationWindow):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", fn)
             self.add_action(act)
+        # Its state follows the renderer's: activating only asks for the change, and the next state shows it.
+        sim = Gio.SimpleAction.new_stateful("simulation", None, GLib.Variant.new_boolean(False))
+        sim.connect("activate", lambda a, _p: self.send("simulation.set", on=not a.get_state().get_boolean()))
+        sim.set_enabled(False)
+        self.add_action(sim)
 
     def win_action(self, name: str) -> None:
         self.lookup_action(name).activate(None)
@@ -1104,6 +1114,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.tap_btn.set_sensitive(self.connected and not self.calibrating)
             self.downbeat_btn.set_sensitive(self.connected and not self.calibrating)
             self.lookup_action("quit-renderer").set_enabled(self.connected)
+            sim = self.lookup_action("simulation")
+            sim.set_enabled(self.connected and not self.calibrating)
+            simulating = bool(self.connected and st and st.get("simulation"))
+            if sim.get_state().get_boolean() != simulating:
+                sim.set_state(GLib.Variant.new_boolean(simulating))
             self.run_btn.set_sensitive(not self.calibrating)
         finally:
             self._ui_guard = False
@@ -1437,6 +1452,7 @@ class MainWindow(Adw.ApplicationWindow):
                              ("Internal / MIDI / Audio clock", ["C"]),
                              ("Scene 1–10", ["1", "…", "9", "0"]), ("Previous / next scene", ["[", "]"]),
                              ("Manual / Random / Sequence", ["M", "R", "S"]), ("Brightness", ["Ctrl", "↑↓"]),
+                             ("Haze simulation", ["H"]),
                              ("Preferences", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"]),
                              ("Quit Floorshow", ["Ctrl", "Q"])]),
         ]

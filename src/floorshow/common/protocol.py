@@ -12,7 +12,7 @@ from .config import Every, TransitionConfig
 PROTO = 1
 # Bumped whenever the controller needs something new from the renderer (a command, a state field). A renderer
 # that reports a lower "rev" (or none) was started before the controller was updated, and the controller says so.
-REV = 8
+REV = 9
 
 
 class _Cmd(BaseModel):
@@ -117,6 +117,11 @@ class TestPatternSet(_Cmd):
     on: bool
 
 
+class SimulationSet(_Cmd):
+    cmd: Literal["simulation.set"]
+    on: bool  # the output window shows the haze simulation instead of the projector image
+
+
 class MidiLearn(_Cmd):
     cmd: Literal["midi.learn"]
     on: bool  # the next note / CC / program change on the control port is reported as a "midi_learned" event
@@ -145,7 +150,7 @@ class Simple(_Cmd):
 Command = Annotated[
     Hello | GetState | SceneSet | RunningSet | ParamSet | ModeSet | BpmSet | MasterSet
     | CalibrationBegin | CalibrationPreview | CalibrationEnd | TestPatternSet | MidiLearn | TrailSet | AccentSet
-    | AudioPreview | MidiPreviewSet | Simple,
+    | AudioPreview | MidiPreviewSet | SimulationSet | Simple,
     Field(discriminator="cmd"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Command)

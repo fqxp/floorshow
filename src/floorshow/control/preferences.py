@@ -22,7 +22,7 @@ from .widgets import (  # noqa: E402
     vbox,
 )
 
-TABS = ["Clock", "MIDI"]
+TABS = ["Clock", "MIDI", "Simulation"]
 SAVE_DELAY_MS = 250
 
 
@@ -54,7 +54,7 @@ class PreferencesDialog(Adw.Window):
         tabs.add_css_class("tabs")
         first: Gtk.ToggleButton | None = None
         self.tab_buttons: dict[str, Gtk.ToggleButton] = {}
-        builders = [self._page_clock, self._page_midi]
+        builders = [self._page_clock, self._page_midi, self._page_simulation]
         for name, build in zip(TABS, builders):
             b = Gtk.ToggleButton(label=name, hexpand=True)
             if first is None:
@@ -164,6 +164,27 @@ class PreferencesDialog(Adw.Window):
         t.add(setting_row("Beats per bar", "Sets the downbeat and the “every N bars” counter.", self.bpb))
         t.add(setting_row("Beat offset", "Shift the beat to cancel projector latency. Positive means later.", self.offset))
         page.append(t)
+
+    # --- Simulation ----------------------------------------------------------------------
+
+    def _page_simulation(self, page: Gtk.Box) -> None:
+        s = self.cfg.simulation
+        g = SettingsGroup("Haze simulation", "Press H, or pick Haze simulation in the menu, and the output window shows "
+                          "the light the ball throws through hazy air instead of the projector image. Drag in it to walk "
+                          "round the ball, scroll to step closer, double-click to go back.")
+
+        def switch(key: str, value: bool) -> Gtk.Switch:
+            sw = Gtk.Switch(active=value, valign=Gtk.Align.CENTER)
+            sw.connect("notify::active", lambda w, _p: self.save("simulation", {key: w.get_active()}))
+            return sw
+
+        self.haze = Stepper(round(s.haze * 100), 0, 100, 10, lambda v: f"<b>{v:.0f}</b> %",
+                            lambda v: self.save("simulation", {"haze": round(v) / 100}))
+        g.add(setting_row("Haze", "How thick the air is: brighter beams, and they fade sooner.", self.haze))
+        g.add(setting_row("Projector beam", "The light from the projector to the ball.", switch("projector_beam", s.projector_beam)))
+        g.add(setting_row("Ball", "The ball itself, its lit tiles and the glints.", switch("ball", s.ball)))
+        g.add(setting_row("Room", "Faint walls and floor, and the spots the beams make on them.", switch("room", s.room)))
+        page.append(g)
 
     def _audio_group(self) -> Gtk.Widget:
         c = self.cfg.clock

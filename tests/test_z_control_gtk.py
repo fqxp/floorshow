@@ -238,6 +238,25 @@ def test_the_trail_slider_applies_live_and_is_remembered(win, tmp_path):
     assert not fake.sent
 
 
+def test_the_haze_simulation_menu_item_and_key_follow_the_renderer(win):
+    w, fake = win
+    act = w.lookup_action("simulation")
+    assert not act.get_enabled()
+    w.set_connection(True)
+    w.apply_state(st())
+    assert act.get_enabled() and not act.get_state().get_boolean()
+    w.win_action("simulation")
+    assert ("simulation.set", {"on": True}) in fake.sent
+    assert not act.get_state().get_boolean()  # only once the renderer says so
+    w.apply_state(st(simulation=True))
+    assert act.get_state().get_boolean()
+    fake.sent.clear()
+    w.run_action("simulation")  # key H
+    assert fake.sent == [("simulation.set", {"on": False})]
+    w.apply_state(st(calibrating=True, simulation=False))
+    assert not act.get_enabled()
+
+
 def test_quit_renderer_is_disabled_while_no_renderer_runs(win):
     w, _ = win
     assert not w.lookup_action("quit-renderer").get_enabled()
@@ -682,7 +701,18 @@ def test_midi_mapping_learn_flow(cfgwin):
 def test_only_the_settings_that_stay_put_are_tabs(cfgwin):
     # scenes and calibration are dialogs of their own, the window is positioned with GNOME,
     # and what is left of the director is set on the main window
-    assert TABS == ["Clock", "MIDI"]
+    assert TABS == ["Clock", "MIDI", "Simulation"]
+
+
+def test_the_simulation_tab_saves_its_settings(cfgwin):
+    w, fake, tmp = cfgwin
+    w.open_preferences()
+    d = w.preferences_dialog
+    d.show_tab("Simulation")
+    d.haze.set_value(60, notify=True)
+    d._flush()
+    assert load_config(tmp / "config.yaml").simulation.haze == 0.6
+    assert ("reload", {}) in fake.sent
 
 
 def test_the_calibration_menu_item_opens_the_wizard_itself(cfgwin):

@@ -22,6 +22,7 @@ from .audio_state import AudioState
 from .frame import FrameSpec, SlotSpec
 from .midi_preview import MidiPreview
 from .gl import Overlay
+from .sim import DEFAULT_DIAMETER_CM, SimSpec, spin_angle
 
 log = logging.getLogger("floorshow.core")
 
@@ -68,6 +69,7 @@ class Core:
         self.window: dict[str, Any] | None = None  # filled by the app: size / fullscreen / monitor of the output window
         self.frame_heartbeat: float | None = None  # set by the render thread after every presented frame
         self.test_pattern = False
+        self.simulation = False  # the output window shows the haze simulation; never kept, see SimulationConfig
         self.learn = False  # MIDI learn: report the next control message instead of acting on it
         self.learn_role = "control"  # which port the learn waits on: "control" or "clock"
         self.outbox: list[dict[str, Any]] = []  # events for all clients, drained by the control loop
@@ -351,6 +353,8 @@ class Core:
             self.accent = cmd.color
         elif isinstance(cmd, P.TestPatternSet):
             self.test_pattern = cmd.on
+        elif isinstance(cmd, P.SimulationSet):
+            self.simulation = cmd.on
         elif isinstance(cmd, P.MidiLearn):
             self.learn, self.learn_role = cmd.on, cmd.role
         elif isinstance(cmd, P.AudioPreview):
@@ -558,6 +562,22 @@ class Core:
         return SlotSpec(sc.evaluate(env), sc.spin(env), sc.asset_order)
 
     def frame(self, now: float, size: tuple[int, int] | None = None) -> FrameSpec:
+        spec = self._frame(now, size)
+        # Calibrating and the test pattern draw on the real ball: never simulated.
+        if self.simulation and spec.overlay is None:
+            spec.sim = self.sim_spec(now)
+        return spec
+
+    def sim_spec(self, now: float) -> SimSpec:
+        b, s = self.config.ball, self.config.simulation
+        tile, row_offset = self._tile()
+        return SimSpec(
+            radius_m=(b.diameter_cm or DEFAULT_DIAMETER_CM) / 200.0, pitch_deg=tile, offset_deg=row_offset or 0.0,
+            spin_rad=spin_angle(b.rotation_rpm, now - self.t0), haze=s.haze,
+            projector_beam=s.projector_beam, ball=s.ball, room=s.room,
+        )
+
+    def _frame(self, now: float, size: tuple[int, int] | None) -> FrameSpec:
         snap = self.clock.snapshot(now)
         cal = self.calibration(size)
         # Always, so the gap does not pile up while calibrating or showing the test pattern, where
@@ -660,6 +680,7 @@ class Core:
             "params": self.params.get(self.current or "", {}),
             "calibrating": self.cal_owner is not None,
             "test_pattern": self.test_pattern,
+            "simulation": self.simulation,
             "learning": self.learn,
             "window": self.window,
             "output": self.output_state(now),

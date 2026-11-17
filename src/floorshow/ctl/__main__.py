@@ -28,6 +28,8 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("value", type=float)
     tr = sub.add_parser("trail", help="how long what disappears keeps glowing, in seconds (0 = off)")
     tr.add_argument("seconds", type=float)
+    si = sub.add_parser("sim", help="haze simulation in the output window")
+    si.add_argument("on", choices=["on", "off"])
     mo = sub.add_parser("mode", help="scene mode")
     mo.add_argument("mode", choices=["manual", "random", "sequence"])
     g = mo.add_mutually_exclusive_group()
@@ -93,6 +95,8 @@ def _dispatch(c: SyncClient, a: argparse.Namespace) -> dict:
         return c.request("master.set", value=a.value)
     if w == "trail":
         return c.request("trail.set", seconds=a.seconds)
+    if w == "sim":
+        return c.request("simulation.set", on=a.on == "on")
     if w == "mode":
         every = {"bars": a.bars} if a.bars else {"beats": a.beats} if a.beats else None
         return c.request("mode.set", mode=a.mode, **({"every": every} if every else {}))

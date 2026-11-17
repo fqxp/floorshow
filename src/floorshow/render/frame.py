@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from ..common.geometry import Calibration
 from ..common.scene import ShapeParams
 from .gl import GlPipeline, Overlay
+from .sim import SimSpec
 
 
 @dataclass
@@ -27,10 +28,19 @@ class FrameSpec:
     overlay: Overlay | None = None
     black: bool = False  # fully blacked out: nothing needs rendering
     trail_decay: float = 0.0  # fraction of last frame that survives; 0 = no trail (see Core.trail_decay)
+    sim: SimSpec | None = None  # haze simulation: show the room lit by the ball instead of the projector image
 
 
 def draw(pipe: GlPipeline, spec: FrameSpec, dest) -> None:
     """Render ``spec`` into the framebuffer ``dest`` (a window's ``ctx.screen`` or an offscreen one)."""
+    if spec.sim is not None:
+        _draw_projector(pipe, spec, pipe.sim.projector_target(*pipe.size))
+        pipe.sim.draw(dest, spec.cal, spec.sim)
+        return
+    _draw_projector(pipe, spec, dest)
+
+
+def _draw_projector(pipe: GlPipeline, spec: FrameSpec, dest) -> None:
     if spec.black and spec.overlay is None:
         pipe.clear_history()  # nothing is drawn, so nothing may fade back in when the show restarts
         dest.use()

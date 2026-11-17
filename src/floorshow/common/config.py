@@ -153,6 +153,15 @@ class TrailConfig(_Base):
     seconds: float = Field(0.0, ge=0, le=3)  # 0 = off
 
 
+class SimulationConfig(_Base):
+    # The haze simulation (output window, key H): what is drawn besides the beams the ball throws. Whether it is
+    # on is not kept here: a renderer always starts showing the projector image, so a show never starts simulated.
+    projector_beam: bool = True
+    ball: bool = True
+    room: bool = True  # faint walls and floor, and the spots the beams make on them
+    haze: float = Field(0.5, ge=0, le=1)
+
+
 class UiConfig(_Base):
     beat_indicator: bool | None = None  # the indicator switch was removed; old files that still have this key keep loading
 
@@ -179,6 +188,7 @@ class Config(_Base):
     schema_version: int = Field(SCHEMA_VERSION, alias="schema")
     clock: ClockConfig = ClockConfig()
     ball: BallConfig = BallConfig()
+    simulation: SimulationConfig = SimulationConfig()
     calibration: CalibrationConfig | None = None  # None: computed default
     director: DirectorConfig = DirectorConfig()
     midi: MidiConfig = MidiConfig()
