@@ -289,6 +289,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.run_btn = Gtk.Button()
         self.run_btn.add_css_class("startstop")
         self.run_btn.set_size_request(200, 92)
+        self.run_btn.set_focusable(False)  # else a focused button toggles on bare Space/Return; Ctrl+Space only
         self.run_icon = icon("media-playback-start-symbolic", 26)
         self.run_spinner = Gtk.Spinner(visible=False)
         self.run_spinner.set_size_request(26, 26)
