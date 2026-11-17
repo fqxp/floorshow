@@ -121,6 +121,7 @@ The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.s
 `kill -USR1 <pid>`). The audio listener's messages go into `render.log` too.
 
 `docs/design-brief.md` is the UI brief and `docs/design/` holds the UI design boards and their generator.
+[docs/adr/](docs/adr/README.md) records the architecture decisions and the evidence behind them.
 
 ## How it works
 
