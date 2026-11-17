@@ -152,6 +152,3 @@ The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.s
   files itself, so it still works offline. Its logic is kept apart from GTK so it can be tested.
 - **Protocol.** JSON Lines over a Unix socket: requests with replies, plus events the renderer sends
   unprompted. The controller and `mirrorballs-ctl` both use it.
-
-`demo.py`, `render.py`, `shapes.py` and `shaders/` at the top level are the original single-file prototype.
-The app lives in `src/mirrorballs/`.

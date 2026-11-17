@@ -3,7 +3,7 @@ direction on the ball.
 
 Coordinates. Window/image coordinates ``u, v`` are normalised to [0, 1], ``u`` left to right and
 ``v`` top to bottom. Ball directions are unit vectors with ``+x`` right, ``+y`` up and ``+z``
-toward the projector (the same axes as the demo shader). ``lat`` +90 is the north pole.
+toward the projector. ``lat`` +90 is the north pole.
 
 The silhouette (four lines) gives an ellipse; a pixel inside it is the hit point of an
 orthographic ray on the sphere. Roll and tilt (phase 2) rotate that image-frame direction into

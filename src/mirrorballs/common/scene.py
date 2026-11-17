@@ -1,7 +1,7 @@
 """Scene files: YAML -> validated model -> compiled scene that yields shader parameters per frame.
 
 Angles in scene files are degrees; ``ShapeParams`` (what the renderer uploads) is in radians.
-Every shape type reduces to the demo's single primitive, an *annulus*: a centre direction plus an
+Every shape type reduces to a single primitive, an *annulus*: a centre direction plus an
 inner and outer angular radius. A latitude band is an annulus about the north pole, a meridian
 band is an annulus of radius 90 degrees about an equatorial point, and so on.
 
