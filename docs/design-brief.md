@@ -23,7 +23,10 @@ preview.
    - **Start/Stop**, the most prominent control. Three states: *Stopped* (green-ish "Start", primary), *Running*
      ("Stop", clearly different), *Starting…* (spinner). Keyboard hint on the button.
    - **Clock strip**: source chip (`MIDI · Arturia BeatStep · 124.0 BPM` / `Internal · 120 BPM` /
-     `MIDI · waiting for clock (holding 118 BPM)`), tap-tempo button (internal only), and the **beat indicator**:
+     `MIDI · waiting for clock (holding 118 BPM)` / `Audio · 124.3 BPM · Monitor of Speakers`), a segmented
+     **Internal | MIDI | Audio** switch, tap-tempo button (internal only), for Audio a source dropdown beside
+     Downbeat (full names, a level meter per channel, constant width), for MIDI a row of port chips each with
+     a small beat tile and the tempo it carries, and the **beat indicator**:
      a large square or circle that **turns red on the beat and fades to the background colour** until the next
      beat, plus four small pips `1 2 3 4` (downbeat emphasised) so it does not rely on colour alone.
      **Do not use red for errors in this window**; use amber for warnings and errors so red always means "beat".
@@ -40,8 +43,9 @@ preview.
 2. **Configuration dialog** (AdwPreferencesDialog-style, pages):
    - *Scenes*: list with add / duplicate / rename / delete / "Open in editor" / "Reveal folder", a validity
      indicator per row, and an error detail for invalid files.
-   - *Clock*: segmented **MIDI clock | Internal BPM**. MIDI shows a port dropdown with refresh; Internal shows
-     a BPM number field (default 120). Also beats per bar and beat offset (ms).
+   - *Clock*: segmented **MIDI clock | Internal BPM | Audio**. MIDI shows a port dropdown with refresh; Internal
+     shows a BPM number field (default 120); Audio shows the source, its status, the tempo range (slowest,
+     fastest) and an audio offset (ms). Also beats per bar and beat offset (ms).
    - *Output*: "Test pattern" button and a hint that the output window is moved and fullscreened via GNOME.
    - *MIDI mappings*: control-port dropdown and a mapping table (trigger, action), plus "Learn" affordance.
    - *Director*: random/sequence options.
