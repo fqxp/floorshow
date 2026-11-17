@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from mirrorballs.common.expr import ExprError, compile_expr
+from floorshow.common.expr import ExprError, compile_expr
 
 ENV = {
     "beat": 37.25, "phase": 0.25, "bar": 9.3125, "scene_beat": 2.0, "time": 12.0,

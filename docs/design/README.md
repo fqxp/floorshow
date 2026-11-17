@@ -1,4 +1,4 @@
-# Mirrorballs UI design
+# Floorshow UI design
 
 Design canvas for the control window, configuration dialog and calibration window
 (built from the app design brief).

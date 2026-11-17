@@ -3,7 +3,7 @@
 Every key, type, variable and function a scene file may contain. For an introduction with worked
 examples, read [scenes-tutorial.md](scenes-tutorial.md) first.
 
-A scene is one YAML file in `~/.config/mirrorballs/scenes/`. Its **scene id is the filename stem**:
+A scene is one YAML file in `~/.config/floorshow/scenes/`. Its **scene id is the filename stem**:
 `ripples.yaml` is the scene `ripples`. Files are hot-reloaded: saving one applies it to the running
 show within half a second.
 
@@ -255,7 +255,7 @@ Paths are relative to the scene file's own directory. A missing file is a load e
 `transition.in` sets how this scene enters **when whoever switches to it does not say otherwise**.
 It beats the default configured for the show, but not an explicit choice: the scene cards and hotkeys
 on the main window always send the transition picked there, so `transition.in` applies to automatic
-changes (Random and Sequence), MIDI triggers, and `mirrorballs-ctl scene <id>` without
+changes (Random and Sequence), MIDI triggers, and `floorshow-ctl scene <id>` without
 `--transition`.
 
 ```yaml

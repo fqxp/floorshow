@@ -42,7 +42,7 @@ tracker that detects every beat 100 ms after it happened scores well offline and
 
 - Every tracker change can be measured in a minute on the same clips: `uv run python tools/beat_bench.py run`.
   The ADRs' figures come from it.
-- Synthetic clips are generated (deterministic, under `~/.cache/mirrorballs/beat-clips/`), not committed; real
+- Synthetic clips are generated (deterministic, under `~/.cache/floorshow/beat-clips/`), not committed; real
   recordings and their references are not in the repository either.
 - Beat This! pulls in PyTorch (a large download) but only into uv's cache, never into the project.
 - Three real tracks are few. Adding recordings is the cheapest way to make the numbers more trustworthy.

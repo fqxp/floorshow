@@ -7,7 +7,7 @@
     uv run --with beat-this python tools/beat_bench.py annotate rec.wav   # reference beats for a real recording
     uv run python tools/beat_bench.py micify song-line.wav            # song-mic.wav: through the simulated mic
 
-Clips live in ~/.cache/mirrorballs/beat-clips (``--dir``). Each ``name.wav`` has ``name.beats`` (one beat time in
+Clips live in ~/.cache/floorshow/beat-clips (``--dir``). Each ``name.wav`` has ``name.beats`` (one beat time in
 seconds per line) and optionally ``name.events`` (times where the tempo or phase changes, for the lock-time metric).
 Real recordings (``tools/audio_spike.py --record``) get their ``.beats`` from ``annotate``, which runs Beat This!, an
 offline tracker that is far better than any causal one, so it serves as the reference.
@@ -40,7 +40,7 @@ from typing import Protocol
 import numpy as np
 
 SR = 44100
-DEFAULT_DIR = Path.home() / ".cache" / "mirrorballs" / "beat-clips"
+DEFAULT_DIR = Path.home() / ".cache" / "floorshow" / "beat-clips"
 QUERY_HZ = 100
 WARMUP_S = 8.0
 F1_WINDOW_S = 0.07
@@ -131,12 +131,12 @@ class AubioEnergy(Aubio):
 
 
 class Ours:
-    """mirrorballs.common.beat_tracker, the tracker the app uses."""
+    """floorshow.common.beat_tracker, the tracker the app uses."""
 
     name = "ours"
 
     def __init__(self, beats: np.ndarray):  # noqa: ARG002
-        from mirrorballs.common.beat_tracker import BeatTracker
+        from floorshow.common.beat_tracker import BeatTracker
 
         self.t = BeatTracker(SR)
 

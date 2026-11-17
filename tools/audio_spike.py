@@ -91,7 +91,7 @@ class Capture:
         if self.dev.kind == "monitor":
             props += ",stream.capture.sink=true"
         desc = (
-            f'pipewiresrc name=src target-object="{self.dev.node}" client-name=mirrorballs-spike '
+            f'pipewiresrc name=src target-object="{self.dev.node}" client-name=floorshow-spike '
             f'stream-properties="{props}" ! audioconvert ! audioresample ! '
             f"audio/x-raw,format=F32LE,channels=1,rate={RATE},layout=interleaved ! "
             + (f"audiobuffersplit output-buffer-duration={round(self.chunk_ms * 10)}/10000 "

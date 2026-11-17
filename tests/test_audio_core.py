@@ -8,11 +8,11 @@ from queue import Empty, SimpleQueue
 
 import pytest
 
-from mirrorballs.common import protocol as P
-from mirrorballs.common.config import ClockConfig
-from mirrorballs.render.audio_state import STALE_S, AudioState
-from mirrorballs.render.core import Core
-from mirrorballs.render.listen import ListenManager
+from floorshow.common import protocol as P
+from floorshow.common.config import ClockConfig
+from floorshow.render.audio_state import STALE_S, AudioState
+from floorshow.render.core import Core
+from floorshow.render.listen import ListenManager
 
 SOURCES = [{"id": "alsa_output.speakers", "name": "Monitor of Speakers", "kind": "monitor", "channels": 2},
            {"id": "alsa_input.mic", "name": "Built-in mic", "kind": "mic", "channels": 2}]

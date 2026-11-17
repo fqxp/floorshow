@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from mirrorballs.common.rawmidi import MidiParser, RawMidiReader, list_raw_ports
-from mirrorballs.render.midi import MidiManager
+from floorshow.common.rawmidi import MidiParser, RawMidiReader, list_raw_ports
+from floorshow.render.midi import MidiManager
 
 
 def test_parser_handles_running_status_realtime_and_sysex():
@@ -88,7 +88,7 @@ def test_reader_delivers_messages_with_arrival_times(tmp_path):
 def test_manager_opens_a_raw_port_by_its_listed_name(tmp_path, monkeypatch):
     fifo = tmp_path / "midiC9D0"
     os.mkfifo(fifo)
-    monkeypatch.setattr("mirrorballs.render.midi.list_raw_ports", lambda **_k: {"VirMIDI 9-0 (raw hw:9,0)": fifo})
+    monkeypatch.setattr("floorshow.render.midi.list_raw_ports", lambda **_k: {"VirMIDI 9-0 (raw hw:9,0)": fifo})
     from queue import SimpleQueue
 
     inbox = SimpleQueue()
@@ -106,5 +106,5 @@ def test_manager_opens_a_raw_port_by_its_listed_name(tmp_path, monkeypatch):
 
 
 def test_manager_lists_raw_ports_with_the_sequencer_ports(monkeypatch):
-    monkeypatch.setattr("mirrorballs.render.midi.list_raw_ports", lambda **_k: {"X 1-0 (raw hw:1,0)": None})
+    monkeypatch.setattr("floorshow.render.midi.list_raw_ports", lambda **_k: {"X 1-0 (raw hw:1,0)": None})
     assert "X 1-0 (raw hw:1,0)" in MidiManager(__import__("queue").SimpleQueue()).list_ports()

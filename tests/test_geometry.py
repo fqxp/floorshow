@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from mirrorballs.common.geometry import (
+from floorshow.common.geometry import (
     Calibration, ball_to_image, image_to_ball, lat_lon, pole_marker, roll_tilt_from_pole,
 )
 

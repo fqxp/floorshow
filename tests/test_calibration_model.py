@@ -1,7 +1,7 @@
 import pytest
 
-from mirrorballs.common.geometry import Calibration
-from mirrorballs.control.calibration_model import Session, fmt_px, key_to_action
+from floorshow.common.geometry import Calibration
+from floorshow.control.calibration_model import Session, fmt_px, key_to_action
 
 W, H = 1920, 1080
 
@@ -99,7 +99,7 @@ def test_apply_reports_whether_the_calibration_changed():
 
 
 def test_preview_payload_is_a_valid_protocol_message():
-    from mirrorballs.common.protocol import parse_command
+    from floorshow.common.protocol import parse_command
 
     s = session(blink=True, grid=True)
     s.apply("line", ("bottom", +1))
@@ -131,8 +131,8 @@ def test_fmt_px():
 
 import math  # noqa: E402
 
-from mirrorballs.common.geometry import pole_marker  # noqa: E402
-from mirrorballs.control.calibration_model import (  # noqa: E402
+from floorshow.common.geometry import pole_marker  # noqa: E402
+from floorshow.control.calibration_model import (  # noqa: E402
     AxisSession, RowsSession, axis_key_to_action, done_key_to_action, rows_key_to_action,
 )
 

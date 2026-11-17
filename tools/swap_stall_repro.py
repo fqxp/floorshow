@@ -10,7 +10,7 @@ MODE
 --keep       turn off GLFW's AUTO_ICONIFY (a fullscreen window is minimised when it loses focus, by default)
 
 The whole window flips between red and blue twice a second, so you can SEE on the projector whether it is
-still being updated. Once a second one line is appended to ~/.local/state/mirrorballs/swap_repro.log:
+still being updated. Once a second one line is appended to ~/.local/state/floorshow/swap_repro.log:
 time, frames presented in that second, focus. Nothing else is needed: just tell me what you saw.
 """
 import os
@@ -25,7 +25,7 @@ import moderngl
 mode = sys.argv[1] if len(sys.argv) > 1 else "blocking"
 seconds = float(sys.argv[2]) if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else 30.0
 monitor_idx = int(sys.argv[sys.argv.index("--monitor") + 1]) if "--monitor" in sys.argv else None
-LOG = Path.home() / ".local/state/mirrorballs/swap_repro.log"
+LOG = Path.home() / ".local/state/floorshow/swap_repro.log"
 LOG.parent.mkdir(parents=True, exist_ok=True)
 logf = LOG.open("a", buffering=1)
 

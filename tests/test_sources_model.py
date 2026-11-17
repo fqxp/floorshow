@@ -1,7 +1,7 @@
 import pytest
 
-from mirrorballs.control import sources_model as sm
-from mirrorballs.control import viewmodel as vm
+from floorshow.control import sources_model as sm
+from floorshow.control import viewmodel as vm
 
 
 def audio(source="out", locked=True, out_db=-12.0, mic_db=-80.0, error=None, running=True, wanted="out"):
@@ -26,13 +26,13 @@ def test_audio_chips_show_levels_and_the_chosen_ones_tempo():
 
 
 def test_midi_chips_show_the_beat_of_each_port():
-    ports = [{"name": "RtMidiOut Client:mirrorballs test clock 128:0", "status": "clock", "bpm": 128.0, "beat_time": 5.0,
+    ports = [{"name": "RtMidiOut Client:floorshow test clock 128:0", "status": "clock", "bpm": 128.0, "beat_time": 5.0,
               "note": None},
              {"name": "Mixxx 1", "status": "beats", "bpm": 100.0, "beat_time": 6.0, "note": 50},
              {"name": "Pads", "status": "active", "bpm": None, "beat_time": None, "note": None},
              {"name": "VirMIDI 1-0 (raw hw:1,0)", "status": "busy", "bpm": None, "beat_time": None, "note": None}]
     items = sm.midi_items(ports)
-    assert [(i.name, i.status) for i in items] == [("mirrorballs test clock", "128 BPM"), ("Mixxx 1", "100 BPM"),
+    assert [(i.name, i.status) for i in items] == [("floorshow test clock", "128 BPM"), ("Mixxx 1", "100 BPM"),
                                                     ("Pads", "no beat"), ("VirMIDI 1-0 (raw hw:1,0)", "busy")]
     assert items[0].id == ports[0]["name"] and items[3].dim
     assert sm.selected_midi(ports, "mixxx") == "Mixxx 1" and sm.selected_midi(ports, "gone") == "gone"

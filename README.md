@@ -1,15 +1,15 @@
-# mirrorballs3
+# floorshow
 
-Mirrorballs drives a video projector aimed at a disco mirror ball. Bands, rings and spots are mapped onto
+Floorshow drives a video projector aimed at a disco mirror ball. Bands, rings and spots are mapped onto
 the calibrated sphere so they land on the ball, follow the music's beat and leave the rest of the room
 dark. One operator runs the show from a laptop while the projector shows only the ball's light.
 
 ## Features
 
-- **Two processes.** A fullscreen output window for the projector (`mirrorballs-render`) and a GTK4/libadwaita
-  control window (`mirrorballs`). You can close, kill or restart the controller without touching the
+- **Two processes.** A fullscreen output window for the projector (`floorshow-render`) and a GTK4/libadwaita
+  control window (`floorshow`). You can close, kill or restart the controller without touching the
   running show. While the beat comes from audio, the renderer runs a third one for the analysis
-  (`mirrorballs-listen`).
+  (`floorshow-listen`).
 - **Scenes as YAML files.** Layers (fill, band, meridian, circle, ring, annulus, textures) with blend modes,
   per-frame expressions over `beat`, `phase`, `bar` and so on, adjustable parameters, spin and transitions.
   Saved files reload into the running show. Bundled examples are in `scenes/`.
@@ -40,7 +40,7 @@ dark. One operator runs the show from a laptop while the projector shows only th
 - **Calibration wizard.** Records the ball's size and tile layout, its silhouette in the projector image,
   its axis (roll and tilt) and its tile rows, then confirms with a turning globe. The calibration remembers
   the output window it was measured in.
-- **Scriptable.** `mirrorballs-ctl` controls a running renderer from a shell (scene, mode, master, trail,
+- **Scriptable.** `floorshow-ctl` controls a running renderer from a shell (scene, mode, master, trail,
   param, state, watch).
 - **Robust output.** The renderer holds an idle inhibitor so the screen doesn't blank, and a watchdog
   writes thread stacks when frames stall. The controller shows a banner when that happens.
@@ -69,7 +69,7 @@ uv sync --extra render --extra control --extra audio
 ```
 
 ```bash
-uv run mirrorballs
+uv run floorshow
 ```
 
 **Start** in the controller launches the renderer if it isn't already running. Move the output window to
@@ -79,11 +79,11 @@ set up the rig.
 For the audio clock, choose **Audio** in the clock strip and pick the source beside Downbeat.
 **Preferences › Clock › Audio** holds the tempo range it looks in (drum and bass at 174 reads as 87 unless
 the slowest tempo is above 87) and an audio offset, added to the beat offset to cancel the delay of the
-sound path. `uv run mirrorballs-listen --list` lists the sources, and `--watch` shows their levels and the
+sound path. `uv run floorshow-listen --list` lists the sources, and `--watch` shows their levels and the
 first one's tempo once a second, without the rest of the app.
 
-Config lives in `~/.config/mirrorballs/config.yaml`, your scenes in `~/.config/mirrorballs/scenes/*.yaml`.
-Both reload while the app runs. Scene previews are cached in `~/.cache/mirrorballs/previews/`. To write
+Config lives in `~/.config/floorshow/config.yaml`, your scenes in `~/.config/floorshow/scenes/*.yaml`.
+Both reload while the app runs. Scene previews are cached in `~/.cache/floorshow/previews/`. To write
 scenes, see [docs/scenes-tutorial.md](docs/scenes-tutorial.md) and [docs/scenes-reference.md](docs/scenes-reference.md).
 
 ## Development
@@ -111,13 +111,13 @@ Helpers in `tools/`:
 - `beat_bench.py` scores beat trackers on what the projector would show: `synth` writes clips with exact
   beats, `run` benchmarks (precision, share of beats in time, lock time after tempo changes, cost per
   source), `annotate` makes reference beats for real recordings with Beat This!, `micify` makes a
-  simulated-microphone copy. Clips live in `~/.cache/mirrorballs/beat-clips/`.
+  simulated-microphone copy. Clips live in `~/.cache/floorshow/beat-clips/`.
 - `audio_spike.py` measures capture through PipeWire (timestamps, jitter, lost audio, CPU) and can record
   WAV clips for the benchmark.
 - `screenshot_ui.py` and `screenshot_dialogs.py` render the windows in each design state.
 - `swap_stall_repro.py` compares frame-loop structures.
 
-The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.stacks` on a stall or after
+The renderer logs to `~/.local/state/floorshow/` (`render.log`, plus `render.stacks` on a stall or after
 `kill -USR1 <pid>`). The audio listener's messages go into `render.log` too.
 
 `docs/design-brief.md` is the UI brief and `docs/design/` holds the UI design boards and their generator.
@@ -136,7 +136,7 @@ The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.s
   the trail, then apply master brightness and the calibration overlay. Because those come after the
   trail, blackout is instant and calibration lines don't smear. Python only uploads a few numbers per
   shape per frame.
-- **Beat detection.** `mirrorballs-listen` runs as a child of the renderer, only while the audio clock
+- **Beat detection.** `floorshow-listen` runs as a child of the renderer, only while the audio clock
   drives the show (its analysis never competes with the frame loop, and a broken audio stack can't take
   the show down). It captures through GStreamer's PipeWire source, one pipeline per source. The chosen
   source's samples go to a causal beat tracker: onsets from multi-band spectral flux, tempo from their
@@ -152,4 +152,4 @@ The renderer logs to `~/.local/state/mirrorballs/` (`render.log`, plus `render.s
   is the only process that writes `config.yaml` (the renderer just reloads it), and it reads the scene
   files itself, so it still works offline. Its logic is kept apart from GTK so it can be tested.
 - **Protocol.** JSON Lines over a Unix socket: requests with replies, plus events the renderer sends
-  unprompted. The controller and `mirrorballs-ctl` both use it.
+  unprompted. The controller and `floorshow-ctl` both use it.

@@ -2,9 +2,9 @@ import random
 
 import pytest
 
-from mirrorballs.common import protocol as P
-from mirrorballs.common.geometry import Calibration
-from mirrorballs.render.core import Core
+from floorshow.common import protocol as P
+from floorshow.common.geometry import Calibration
+from floorshow.render.core import Core
 
 SCENE = "schema: 1\nname: {n}\ntags: [{tags}]\nlayers:\n  - {{type: fill, color: white}}\n"
 

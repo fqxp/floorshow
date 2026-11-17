@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-16
-- Code: `src/mirrorballs/common/beat_tracker.py`, benchmark `tools/beat_bench.py`
+- Code: `src/floorshow/common/beat_tracker.py`, benchmark `tools/beat_bench.py`
 
 ## Context
 

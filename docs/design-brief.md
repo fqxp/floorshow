@@ -1,8 +1,8 @@
-# Mirrorballs: design brief for Claude Design
+# Floorshow: design brief for Claude Design
 
 Paste everything below into a new chat at claude.ai/design.
 
-**What it is.** *Mirrorballs* is a Linux desktop app (GTK4 + libadwaita) that drives a video projector aimed at a
+**What it is.** *Floorshow* is a Linux desktop app (GTK4 + libadwaita) that drives a video projector aimed at a
 disco mirror ball. The operator picks animated "scenes" (light bands, rings and spots that hit the ball on the
 beat). The app has a **control window** on the laptop and a separate fullscreen **output window** on the
 projector, which is just black or light shapes and needs no design work.

@@ -12,7 +12,7 @@ modified: 2026-11-03T20:12:30.710565096+00:00
 
 A scene is a small YAML file that says what lights up on the mirror ball and how it moves with the beat. There is no code to compile and nothing to restart: save the file and the running show picks it up within half a second.
 
-This is a tutorial. Every example is a complete file you can copy into `~/.config/mirrorballs/scenes/` and watch. The companion [reference](scenes-reference.md) lists every key and function; come back to it once the ideas here make sense.
+This is a tutorial. Every example is a complete file you can copy into `~/.config/floorshow/scenes/` and watch. The companion [reference](scenes-reference.md) lists every key and function; come back to it once the ideas here make sense.
 
 It assumes you can read a bit of code. It does not assume you know anything about graphics.
 
@@ -27,7 +27,7 @@ layers:
   - {type: fill}
 ```
 
-Save that as `everything.yaml` and the whole ball lights up white. Three things are required: `schema: 1`, a `name`, and at least one layer. The **scene's id is the filename**, so this one is `everything`, and that is what appears in the controller and in `mirrorballs-ctl`.
+Save that as `everything.yaml` and the whole ball lights up white. Three things are required: `schema: 1`, a `name`, and at least one layer. The **scene's id is the filename**, so this one is `everything`, and that is what appears in the controller and in `floorshow-ctl`.
 
 Layers are shapes, drawn in order, later over earlier. `fill` is the whole ball; the rest of this tutorial is about the more interesting five.
 
@@ -348,7 +348,7 @@ layers:
 
 While it arrives, `trans` climbs from 0 to 1, so the scene can animate its own entrance — multiply a radius by `trans` and the shape grows into place.
 
-Note that this is the scene's *preference*. Clicking a scene on the main window sends the transition picked there, which wins; `transition.in` applies when the change comes from Random or Sequence mode, a MIDI trigger, or `mirrorballs-ctl`.
+Note that this is the scene's *preference*. Clicking a scene on the main window sends the transition picked there, which wins; `transition.in` applies when the change comes from Random or Sequence mode, a MIDI trigger, or `floorshow-ctl`.
 
 `spin` turns the whole scene:
 
@@ -432,4 +432,4 @@ The one such effect that exists, **Trail**, is therefore not part of the languag
 
 - The [reference](scenes-reference.md) has every key, variable and function.
 - The bundled examples in `scenes/` are the five scenes this tutorial draws from, in their final form: `bars-to-poles`, `kick-spot`, `ripples`, `row-stepper`, `sweep-and-sparkle`.
-- To test a scene without a projector, run the renderer in a window: `uv run mirrorballs-render`, and switch to your scene with `uv run mirrorballs-ctl scene <id>`. Fake a tempo with `uv run python tools/midi_clock.py --bpm 128` if you have no music running.
+- To test a scene without a projector, run the renderer in a window: `uv run floorshow-render`, and switch to your scene with `uv run floorshow-ctl scene <id>`. Fake a tempo with `uv run python tools/midi_clock.py --bpm 128` if you have no music running.

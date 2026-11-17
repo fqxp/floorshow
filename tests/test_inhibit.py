@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from mirrorballs.render.inhibit import IdleInhibitor
+from floorshow.render.inhibit import IdleInhibitor
 
 CALL = ["gdbus", "call", "--session", "--dest", "org.gnome.SessionManager", "--object-path", "/org/gnome/SessionManager",
         "--method", "org.gnome.SessionManager.GetInhibitors"]

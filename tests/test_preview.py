@@ -9,9 +9,9 @@ import moderngl
 import numpy as np
 import pytest
 
-from mirrorballs.common.scene import load_scene, load_scene_text
-from mirrorballs.render import preview
-from mirrorballs.render.gl import GlPipeline
+from floorshow.common.scene import load_scene, load_scene_text
+from floorshow.render import preview
+from floorshow.render.gl import GlPipeline
 
 ROOT = Path(__file__).resolve().parent.parent
 W, H = 120, 68

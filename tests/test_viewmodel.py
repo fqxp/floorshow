@@ -1,7 +1,7 @@
 import pytest
 
-from mirrorballs.control import tokens, viewmodel as vm
-from mirrorballs.control.viewmodel import (
+from floorshow.control import tokens, viewmodel as vm
+from floorshow.control.viewmodel import (
     LENGTHS, banners, beat_in_bar, clock_text, display_name, hotkeys, nearest_length, renderer_chip,
     scene_for_key, transition_payload,
 )
@@ -101,7 +101,7 @@ def test_tokens_and_css():
 
 
 def test_the_panic_blackout_needs_four_escapes_in_a_row():
-    from mirrorballs.control.viewmodel import panic_press
+    from floorshow.control.viewmodel import panic_press
 
     t: list[float] = []
     assert [panic_press(t, x) for x in (0.0, 0.3, 0.6, 0.9)] == [False, False, False, True]
@@ -112,7 +112,7 @@ def test_the_panic_blackout_needs_four_escapes_in_a_row():
 
 
 def test_key_to_action_matches_the_shortcut_sheet():
-    from mirrorballs.control.viewmodel import key_to_action as k
+    from floorshow.control.viewmodel import key_to_action as k
 
     assert k("space", ctrl=True) == ("toggle-run", None) and k("t") == ("tap", None) and k("d") == ("downbeat", None) and k("b", ctrl=True) == ("blackout", None)
     assert k("m") == ("mode", "manual") and k("r") == ("mode", "random") and k("s") == ("mode", "sequence")

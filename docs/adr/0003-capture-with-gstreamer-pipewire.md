@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-16
-- Code: `src/mirrorballs/listen/gst_capture.py`, spike `tools/audio_spike.py`
+- Code: `src/floorshow/listen/gst_capture.py`, spike `tools/audio_spike.py`
 
 ## Context
 

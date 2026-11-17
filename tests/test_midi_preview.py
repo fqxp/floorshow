@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from mirrorballs.render.midi_preview import MidiPreview
+from floorshow.render.midi_preview import MidiPreview
 
 PORT = "VirMIDI 1-0"
 

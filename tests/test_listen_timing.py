@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mirrorballs.listen.timing import CAPTURE_DELAY_S, SampleClock
+from floorshow.listen.timing import CAPTURE_DELAY_S, SampleClock
 
 SR = 48000
 

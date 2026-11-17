@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 from test_beat_tracker import track
 
-from mirrorballs.listen import engine
-from mirrorballs.listen.engine import SR, Listener, SourceAnalyzer
+from floorshow.listen import engine
+from floorshow.listen.engine import SR, Listener, SourceAnalyzer
 
 BLOCK = SR // 50  # 20 ms
 

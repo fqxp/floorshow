@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from mirrorballs.common.scene import SceneError, load_scene_text, make_env
+from floorshow.common.scene import SceneError, load_scene_text, make_env
 
 ROOT = Path(__file__).resolve().parent.parent
 TUTORIAL, REFERENCE = ROOT / "docs/scenes-tutorial.md", ROOT / "docs/scenes-reference.md"

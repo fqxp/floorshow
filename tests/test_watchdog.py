@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from mirrorballs.render.watchdog import StallWatchdog
+from floorshow.render.watchdog import StallWatchdog
 
 
 def test_dumps_once_per_stall_and_rearms():
@@ -24,7 +24,7 @@ def test_dumps_once_per_stall_and_rearms():
 
 def test_a_real_dump_shows_what_the_blocked_thread_is_waiting_on(tmp_path):
     """The point of the watchdog: the dump names the blocking call."""
-    from mirrorballs.render.watchdog import file_dumper
+    from floorshow.render.watchdog import file_dumper
     import threading
 
     gate = threading.Event()
@@ -46,7 +46,7 @@ def test_a_real_dump_shows_what_the_blocked_thread_is_waiting_on(tmp_path):
 def test_sigusr1_dumps_stacks_of_a_running_process(tmp_path):
     script = textwrap.dedent(f"""
         import time
-        from mirrorballs.render.watchdog import install_signal_dump
+        from floorshow.render.watchdog import install_signal_dump
         f = open({str(tmp_path / 'sig.stacks')!r}, 'a', buffering=1)
         install_signal_dump(f)
         def waiting_forever():

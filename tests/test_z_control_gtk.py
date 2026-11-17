@@ -19,17 +19,17 @@ except (ValueError, ImportError):  # pragma: no cover
 if not Gtk.init_check() or Gdk.Display.get_default() is None:  # pragma: no cover
     pytest.skip("no display", allow_module_level=True)
 
-from mirrorballs.control import tokens as _tokens  # noqa: E402
+from floorshow.control import tokens as _tokens  # noqa: E402
 
 _tokens.pin_base_font()  # the sizes below are the design's, so the design's base font is what they need
 
-from mirrorballs.control import tokens, viewmodel as vm
-from mirrorballs.common.config import load_config
-from mirrorballs.control.client import RendererClient
-from mirrorballs.control.library import Library
-from mirrorballs.control.main_window import MainWindow
-from mirrorballs.control.calibration import DIAMETERS_CM
-from mirrorballs.control.store import ConfigStore
+from floorshow.control import tokens, viewmodel as vm
+from floorshow.common.config import load_config
+from floorshow.control.client import RendererClient
+from floorshow.control.library import Library
+from floorshow.control.main_window import MainWindow
+from floorshow.control.calibration import DIAMETERS_CM
+from floorshow.control.store import ConfigStore
 
 from test_render_io import Rig  # noqa: E402  (real IPC server + Core on a thread)
 
@@ -62,7 +62,7 @@ class FakeClient:
 
 @pytest.fixture(scope="module")
 def app():
-    a = Adw.Application(application_id="de.fqxp.MirrorballsTest")
+    a = Adw.Application(application_id="de.fqxp.FloorshowTest")
     a.register(None)
     prov = Gtk.CssProvider()
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -457,7 +457,7 @@ def test_use_internal_clock_banner_writes_config(win, tmp_path):
     (tmp_path / "config.yaml").write_text("clock: {source: midi, midi_port: X}\n")
     w.set_connection(True)
     w.apply_state(st(clock=dict(st()["clock"], source="midi", locked=False, port="X")))
-    from mirrorballs.control.viewmodel import banners
+    from floorshow.control.viewmodel import banners
 
     w.act_banner(banners(True, w.state)[0])
     assert w.store.load().clock.source == "internal" and ("reload", {}) in fake.sent
@@ -561,13 +561,13 @@ def test_client_talks_to_a_live_renderer(app, tmp_path):
 
 # --- configuration dialog and calibration window ---------------------------------------------
 
-from mirrorballs.common import paths  # noqa: E402
-from mirrorballs.control.preferences import TABS  # noqa: E402
+from floorshow.common import paths  # noqa: E402
+from floorshow.control.preferences import TABS  # noqa: E402
 
 
 @pytest.fixture
 def cfgwin(app, tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRRORBALLS_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setenv("FLOORSHOW_CONFIG_DIR", str(tmp_path / "cfg"))
     bundled = scene_dir(tmp_path)
     fake = FakeClient()
     (tmp_path / "config.yaml").write_text("schema: 1\nmidi: {control_port: Pad}\n")
@@ -702,7 +702,7 @@ def test_scene_file_operations(cfgwin):
     d._select("alpha")  # a bundled example: can be duplicated but not renamed or deleted
     assert d.dup_btn.get_sensitive() and not d.rename_btn.get_sensitive() and not d.delete_btn.get_sensitive()
     src = d._scene_path("alpha")
-    from mirrorballs.control import scene_files as sf
+    from floorshow.control import scene_files as sf
 
     d._after_file_change(sf.duplicate_scene(src, paths.user_scenes_dir(), "Alpha copy", set(w.library.scenes)))
     assert "alpha-copy" in w.library.scenes
@@ -728,7 +728,7 @@ def test_calibration_window_flow_with_a_fake_renderer(cfgwin):
     assert (s.width, s.height) == (1920, 1080) and not s.dirty
     assert cal.read_centre.get_text() == "960, 540 px" and cal.read_size.get_text() == "756 × 756 px"
     for key in ("a", "a", "3", "d"):
-        from mirrorballs.control.calibration_model import key_to_action
+        from floorshow.control.calibration_model import key_to_action
 
         cal._act(*key_to_action(key))
     assert s.dirty
@@ -785,7 +785,7 @@ def test_calibration_banners_for_starting_and_windowed_output(cfgwin):
 
 
 def test_calibration_against_a_live_renderer_core(app, tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRRORBALLS_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setenv("FLOORSHOW_CONFIG_DIR", str(tmp_path / "cfg"))
     rig = Rig(tmp_path)
     got = {}
     win = MainWindow(app, None, Library([tmp_path / "scenes"]), ConfigStore(tmp_path / "config.yaml"))
@@ -1058,7 +1058,7 @@ def test_resetting_the_ball_step_puts_the_placeholders_back(cfgwin):
 
 def test_every_step_leads_to_the_confirmation_screen(cfgwin):
     w, fake, tmp = cfgwin
-    from mirrorballs.control.calibration_model import done_key_to_action, key_to_action, rows_key_to_action
+    from floorshow.control.calibration_model import done_key_to_action, key_to_action, rows_key_to_action
 
     w.open_calibration()
     cal = w.calibration_window
@@ -1120,7 +1120,7 @@ def test_resetting_the_rows_step_switches_snapping_off_again(cfgwin):
 
 def test_step_keys_reach_the_right_handlers(cfgwin):
     w, fake, tmp = cfgwin
-    from mirrorballs.control.calibration_model import axis_key_to_action, rows_key_to_action
+    from floorshow.control.calibration_model import axis_key_to_action, rows_key_to_action
 
     w.open_calibration()
     cal = w.calibration_window
@@ -1150,7 +1150,7 @@ def test_calibration_window_fits_the_designed_720_pixel_width_on_every_step(cfgw
 
 
 def test_three_step_calibration_against_a_live_renderer_core(app, tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRRORBALLS_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setenv("FLOORSHOW_CONFIG_DIR", str(tmp_path / "cfg"))
     rig = Rig(tmp_path)
     win = MainWindow(app, None, Library([tmp_path / "scenes"]), ConfigStore(tmp_path / "config.yaml"))
     client = RendererClient(rig.sock, win.apply_state, win.set_connection, win.toast, win.apply_event)
@@ -1221,8 +1221,8 @@ def pwin(app, tmp_path, monkeypatch):
     import numpy as np
     from PIL import Image
 
-    from mirrorballs.control.preview_widgets import PreviewManager, PreviewPicture
-    from mirrorballs.control.previews import PreviewCache
+    from floorshow.control.preview_widgets import PreviewManager, PreviewPicture
+    from floorshow.control.previews import PreviewCache
 
     jobs = []
 
@@ -1247,7 +1247,7 @@ def pwin(app, tmp_path, monkeypatch):
 
 def test_card_previews_fill_the_card_at_16_9_and_never_get_smaller(pwin):
     w, jobs, PreviewPicture = pwin
-    from mirrorballs.control.previews import OVERSAMPLE, THUMB_H, THUMB_W
+    from floorshow.control.previews import OVERSAMPLE, THUMB_H, THUMB_W
 
     pics = all_of(w.grid, PreviewPicture)
     assert sorted(p.sid for p in pics) == ["alpha", "beta"]

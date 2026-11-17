@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-16
-- Code: `src/mirrorballs/listen/engine.py` (`MAX_AGE_S`, `LOAD_LIMIT`, `Listener.check_load`)
+- Code: `src/floorshow/listen/engine.py` (`MAX_AGE_S`, `LOAD_LIMIT`, `Listener.check_load`)
 
 ## Context
 
@@ -42,7 +42,7 @@ A source is "ok" when its age is under 150 ms and its load under 0.25.
 
 - The pause reacts to what matters (the beat being corrected late), not to a number that depends on the CPU's clock
   speed.
-- The load figure in the health messages and in `mirrorballs-listen --watch` looks alarming on an idle laptop; this
+- The load figure in the health messages and in `floorshow-listen --watch` looks alarming on an idle laptop; this
   record is the explanation.
 - Since previews became level meters measured inside GStreamer (no samples in Python), a pause is unlikely; the
   mechanism stays as a safety net.

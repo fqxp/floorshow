@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mirrorballs.common.beat_tracker import BeatTracker
+from floorshow.common.beat_tracker import BeatTracker
 
 SR = 44100
 

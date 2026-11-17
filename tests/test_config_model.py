@@ -2,9 +2,9 @@
 import pytest
 from ruamel.yaml import YAML
 
-from mirrorballs.common.scene import load_scene
-from mirrorballs.control import config_model as cm
-from mirrorballs.control import scene_files as sf
+from floorshow.common.scene import load_scene
+from floorshow.control import config_model as cm
+from floorshow.control import scene_files as sf
 
 
 def test_note_and_trigger_labels():

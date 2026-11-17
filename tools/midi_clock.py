@@ -4,7 +4,7 @@
     uv run python tools/midi_clock.py --bpm 128 --measure 10   # also receives its own clock, prints jitter
     uv run python tools/midi_clock.py --bpm 128 --beat-notes   # the messages of Mixxx's "MIDI for light" script
 
-Creates an ALSA sequencer output port named "mirrorballs test clock", sends Start, then 24 ticks
+Creates an ALSA sequencer output port named "floorshow test clock", sends Start, then 24 ticks
 per beat. Pick that port as the clock source in the app.
 """
 
@@ -14,7 +14,7 @@ import time
 
 import rtmidi
 
-PORT_NAME = "mirrorballs test clock"
+PORT_NAME = "floorshow test clock"
 CLOCK, START, STOP = 0xF8, 0xFA, 0xFC
 
 

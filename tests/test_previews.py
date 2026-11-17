@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from mirrorballs.common.scene import load_scene
-from mirrorballs.control.previews import Clip, Look, PreviewCache, frame_index
+from floorshow.common.scene import load_scene
+from floorshow.control.previews import Clip, Look, PreviewCache, frame_index
 
 LOOK = Look(width=120, height=68, accent=(1.0, 1.0, 1.0), tile=4.0, row_offset=None, beats_per_bar=4, bpm=120.0)
 PLAIN = "schema: 1\nname: Plain\nlayers:\n  - {type: fill}\n"

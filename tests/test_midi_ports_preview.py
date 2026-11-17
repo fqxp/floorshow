@@ -6,9 +6,9 @@ from queue import SimpleQueue
 
 import pytest
 
-from mirrorballs.common import protocol as P
-from mirrorballs.render.core import Core
-from mirrorballs.render.dispatch import pump
+from floorshow.common import protocol as P
+from floorshow.render.core import Core
+from floorshow.render.dispatch import pump
 
 SCENE = "schema: 1\nname: a\nlayers:\n  - {type: fill, color: white}\n"
 
@@ -63,7 +63,7 @@ def test_preview_only_messages_trigger_nothing(tmp_path):
 
 def test_the_manager_opens_every_port_while_previewing():
     rtmidi = pytest.importorskip("rtmidi")
-    from mirrorballs.render.midi import MidiManager
+    from floorshow.render.midi import MidiManager
 
     outs = []
     try:

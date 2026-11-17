@@ -218,7 +218,7 @@ for si, (name, cols, files) in enumerate(sections):
 canvas = {
     'v': 3,
     'createdOnFiles': {'v': 1, 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')},
-    'title': 'Mirrorballs Control UI',
+    'title': 'Floorshow Control UI',
     'launch': {'view': 'canvas'},
     'pages': [],
     'boards': bd,

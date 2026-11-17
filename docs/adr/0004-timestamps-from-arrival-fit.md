@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-16
-- Code: `src/mirrorballs/listen/timing.py`, tests `tests/test_listen_timing.py`
+- Code: `src/floorshow/listen/timing.py`, tests `tests/test_listen_timing.py`
 
 ## Context
 

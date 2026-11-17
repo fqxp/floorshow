@@ -71,7 +71,7 @@ def conn_chip(renderer):
 
 def header(renderer):
     return (f'<div style="height:48px;flex:none;display:flex;align-items:center;padding:0 8px 0 12px;background:{K.bg1};border-bottom:1px solid {K.line}">'
-            f'<div style="flex:1;display:flex">{conn_chip(renderer)}</div><div style="font-weight:700;font-size:15px">Mirrorballs</div>'
+            f'<div style="flex:1;display:flex">{conn_chip(renderer)}</div><div style="font-weight:700;font-size:15px">Floorshow</div>'
             f'<div style="flex:1;display:flex;justify-content:flex-end">{ibtn("menu", "Main menu", 36, "ghost", isz=20)}</div></div>')
 
 
@@ -163,7 +163,7 @@ def master_panel(dis=False, blackout=False):
                  'gap:10px;flex:none')
 
 
-MENU_ITEMS = [('Configuration…', 'Ctrl+,'), ('Quit renderer', ''), None, ('Keyboard shortcuts', 'Ctrl+?'), ('About Mirrorballs', '')]
+MENU_ITEMS = [('Configuration…', 'Ctrl+,'), ('Quit renderer', ''), None, ('Keyboard shortcuts', 'Ctrl+?'), ('About Floorshow', '')]
 
 
 def main_window(renderer='running', clock='midi', controls='empty', bnr=None, beat=.7, pip=1, active=0,

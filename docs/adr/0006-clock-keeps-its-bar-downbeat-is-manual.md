@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-16
-- Code: `Clock.use_audio` and `Clock.on_audio_estimate` in `src/mirrorballs/common/clock.py`, tests in
+- Code: `Clock.use_audio` and `Clock.on_audio_estimate` in `src/floorshow/common/clock.py`, tests in
   `tests/test_clock.py`
 
 ## Context

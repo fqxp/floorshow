@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from mirrorballs.common.scene import SceneError, load_library, load_scene, load_scene_text, make_env
+from floorshow.common.scene import SceneError, load_library, load_scene, load_scene_text, make_env
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENES = ROOT / "scenes"

@@ -13,11 +13,11 @@ gi.require_version("Adw", "1")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Graphene, GLib, Gtk  # noqa: E402
 
-from mirrorballs.control import tokens  # noqa: E402
-from mirrorballs.control.library import Library  # noqa: E402
-from mirrorballs.control.main_window import MainWindow  # noqa: E402
-from mirrorballs.control.previews import PreviewCache  # noqa: E402
-from mirrorballs.control.store import ConfigStore  # noqa: E402
+from floorshow.control import tokens  # noqa: E402
+from floorshow.control.library import Library  # noqa: E402
+from floorshow.control.main_window import MainWindow  # noqa: E402
+from floorshow.control.previews import PreviewCache  # noqa: E402
+from floorshow.control.store import ConfigStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "ui-shots")
@@ -161,6 +161,6 @@ def on_activate(app):
     app.quit()
 
 
-app = Adw.Application(application_id="de.fqxp.MirrorballsShots")
+app = Adw.Application(application_id="de.fqxp.FloorshowShots")
 app.connect("activate", on_activate)
 app.run([])

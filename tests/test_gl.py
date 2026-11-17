@@ -8,9 +8,9 @@ import numpy as np
 from dataclasses import replace
 import pytest
 
-from mirrorballs.common.geometry import Calibration, lat_lon
-from mirrorballs.common.scene import ShapeParams, load_scene_text, make_env
-from mirrorballs.render.gl import GlPipeline, Overlay
+from floorshow.common.geometry import Calibration, lat_lon
+from floorshow.common.scene import ShapeParams, load_scene_text, make_env
+from floorshow.render.gl import GlPipeline, Overlay
 
 W, H = 320, 180
 ROOT = Path(__file__).resolve().parent.parent

@@ -7,11 +7,11 @@ from queue import SimpleQueue
 
 import pytest
 
-from mirrorballs.ctl import __main__ as ctl_main
-from mirrorballs.ctl.client import NotRunning, SyncClient
-from mirrorballs.render.core import Core
-from mirrorballs.render.dispatch import pump
-from mirrorballs.render.ipc_server import AlreadyRunning, IpcServer
+from floorshow.ctl import __main__ as ctl_main
+from floorshow.ctl.client import NotRunning, SyncClient
+from floorshow.render.core import Core
+from floorshow.render.dispatch import pump
+from floorshow.render.ipc_server import AlreadyRunning, IpcServer
 
 SCENE = "schema: 1\nname: {n}\nparams:\n  w: {{type: float, default: 5, min: 1, max: 10}}\nlayers:\n  - {{type: fill}}\n"
 
@@ -135,7 +135,7 @@ def test_socket_is_private(rig):
 
 
 def test_ctl_cli(rig, monkeypatch, capsys):
-    monkeypatch.setenv("MIRRORBALLS_SOCKET", str(rig.sock))
+    monkeypatch.setenv("FLOORSHOW_SOCKET", str(rig.sock))
     assert ctl_main.main(["scene", "c", "--transition", "cut"]) == 0
     assert ctl_main.main(["scenes"]) == 0
     out = capsys.readouterr().out
@@ -153,7 +153,7 @@ def test_ctl_cli(rig, monkeypatch, capsys):
 
 
 def test_ctl_reports_a_missing_renderer(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MIRRORBALLS_SOCKET", str(tmp_path / "none.sock"))
+    monkeypatch.setenv("FLOORSHOW_SOCKET", str(tmp_path / "none.sock"))
     assert ctl_main.main(["state"]) == 2
     assert "no renderer" in capsys.readouterr().err
 
@@ -163,7 +163,7 @@ def test_ctl_reports_a_missing_renderer(tmp_path, monkeypatch, capsys):
 
 def test_midi_manager_receives_clock_and_reconnects():
     rtmidi = pytest.importorskip("rtmidi")
-    from mirrorballs.render.midi import MidiManager
+    from floorshow.render.midi import MidiManager
 
     try:
         out = rtmidi.MidiOut()
@@ -202,7 +202,7 @@ def test_midi_manager_receives_clock_and_reconnects():
 def test_output_window_is_not_minimised_when_it_loses_focus():
     """Regression: GLFW minimises a fullscreen window on focus loss by default, which made the projector image
     vanish whenever another window was clicked."""
-    from mirrorballs.render.app import configure_output_window
+    from floorshow.render.app import configure_output_window
 
     class FakeGlfw:
         AUTO_ICONIFY, CURSOR, CURSOR_HIDDEN, FALSE = 0x20006, 0x33001, 0x34002, 0

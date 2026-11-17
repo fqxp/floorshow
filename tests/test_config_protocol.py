@@ -1,10 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
-from mirrorballs.common.config import CalibrationConfig, Config, ConfigError, load_config, update_config
-from mirrorballs.common.geometry import Calibration
-from mirrorballs.common.ipc import LineDecoder, encode
-from mirrorballs.common.protocol import error, ok, parse_command
+from floorshow.common.config import CalibrationConfig, Config, ConfigError, load_config, update_config
+from floorshow.common.geometry import Calibration
+from floorshow.common.ipc import LineDecoder, encode
+from floorshow.common.protocol import error, ok, parse_command
 
 
 def test_missing_file_gives_defaults(tmp_path):

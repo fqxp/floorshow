@@ -3,7 +3,7 @@ import random
 import numpy as np
 import pytest
 
-from mirrorballs.common.clock import PPQN, Clock
+from floorshow.common.clock import PPQN, Clock
 
 
 def feed_ticks(clock, bpm, seconds, t0=0.0, jitter=0.0, seed=1, first_tick=0):
@@ -299,7 +299,7 @@ def test_audio_estimates_are_ignored_by_the_other_sources():
 def test_audio_clock_follows_the_tracker_on_real_audio():
     from test_beat_tracker import SR, track
 
-    from mirrorballs.common.beat_tracker import BeatTracker
+    from floorshow.common.beat_tracker import BeatTracker
 
     y, beats = track([(40, 126, True, 0)])
     t0 = 50.0
