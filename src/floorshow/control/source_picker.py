@@ -1,8 +1,8 @@
-"""The source picker below the clock strip (audio sources with level meters, MIDI ports with beat previews) and the
+"""The source dropdowns beside Downbeat (audio sources with level meters, MIDI ports with beat previews) and the
 popover over the Audio option. Only drawing and widgets; what they show comes from sources_model.
 
-Meters and beat tiles move every frame, the chips themselves are rebuilt only when the list of sources changes, so a
-level change never relayouts the window. Colours keep to the design's rules: the accent for levels, amber near
+Meters and beat tiles move every frame, the lists themselves are rebuilt only when the sources change, so a level
+change never relayouts the window. Colours keep to the design's rules: the accent for levels, amber near
 clipping, red only for a beat.
 """
 
@@ -15,8 +15,7 @@ from typing import Any, Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 from . import sources_model as sm, tokens  # noqa: E402
 from .widgets import hbox, label  # noqa: E402
@@ -25,7 +24,6 @@ METER_FLOOR_DB = -60.0
 CLIP_DB = -1.0
 REPAINT_S = 1 / 30
 HOVER_DELAY_MS = 180
-MAX_ROWS_PX = 64  # two lines of chips (2 x 29 px + 6 px between); more scroll
 
 
 def _rounded(cr: Any, x: float, y: float, w: float, h: float, r: float) -> None:
@@ -119,142 +117,27 @@ class Pulse(Gtk.DrawingArea):
         cr.fill()
 
 
-class SourceChip(Gtk.ToggleButton):
-    """One MIDI port: a beat tile at the port's tempo, the name, and what the port carries."""
-
-    def __init__(self, item: sm.Item) -> None:
-        super().__init__()
-        self.add_css_class("chip-toggle")
-        self.add_css_class("small")
-        self.add_css_class("source-chip")
-        self.item_id = item.id
-        self.pulse = Pulse()
-        self.name = label(item.name)
-        self.name.set_ellipsize(Pango.EllipsizeMode.END)
-        # Never squeezed below a readable start of the name, never wider than a long port name needs to be told apart
-        self.name.set_width_chars(min(len(item.name), 12))
-        self.name.set_max_width_chars(20)
-        self.status = label("", "chip-status")
-        self.set_child(hbox(6, self.pulse, self.name, self.status))
-        self.set_tooltip_text(item.name if item.id == item.name else f"{item.name}\n{item.id}")
-        self.item = item
-        self.update(item)
-
-    def update(self, item: sm.Item) -> None:
-        self.item = item
-        if self.status.get_text() != item.status:
-            self.status.set_text(item.status)
-            self.status.set_visible(bool(item.status))
-        if item.dim != self.has_css_class("dim"):
-            (self.add_css_class if item.dim else self.remove_css_class)("dim")
-
-    def tick(self, now: float) -> None:
-        self.pulse.set_phase(sm.beat_phase(self.item.bpm, self.item.beat_time, now))
-
-    def set_dark(self, dark: bool) -> None:
-        self.pulse.dark = dark
-        self.pulse.queue_draw()
-
-
-class SourcePicker(Gtk.Box):
-    """The MIDI ports as a row of chips; the chosen one is checked. ``on_pick(id)`` on a click."""
-
-    def __init__(self, title: str, on_pick: Callable[[str], None]) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # the title above: the chips get the width
-        self.add_css_class("source-picker")
-        self.on_pick = on_pick
-        self.title = label(title.upper(), "hint")
-        # Every source in view at once: the chips wrap like words (each as wide as its name), two lines before the
-        # rest scroll. (A FlowBox would lay them out in equal columns as wide as the widest chip.)
-        self.row = Adw.WrapBox(child_spacing=6, line_spacing=6, valign=Gtk.Align.START)
-        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                      vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, hexpand=True)
-        scroller.set_propagate_natural_height(True)
-        scroller.set_max_content_height(MAX_ROWS_PX)
-        scroller.set_child(self.row)
-        self.empty = label("", "secondary")
-        self.append(self.title)
-        self.append(scroller)
-        self.append(self.empty)
-        self.chips: dict[str, SourceChip] = {}
-        self._key: str | None = None
-        self._guard = False
-        self._selected: str | None = None
-        self.dark = True
-
-    def set_items(self, items: list[sm.Item], selected: str | None, empty_text: str) -> None:
-        key = sm.items_key(items)
-        if key != self._key:
-            self._key = key
-            while (c := self.row.get_first_child()) is not None:
-                self.row.remove(c)
-            self.chips = {}
-            first: SourceChip | None = None
-            for it in items:
-                chip = SourceChip(it)
-                chip.set_dark(self.dark)
-                if first is None:
-                    first = chip
-                else:
-                    chip.set_group(first)
-                chip.connect("toggled", self._toggled)
-                self.row.append(chip)
-                self.chips[it.id] = chip
-        else:
-            for it in items:
-                self.chips[it.id].update(it)
-        self.empty.set_text(empty_text)
-        self.empty.set_visible(not items)
-        self._select(selected)
-
-    def _select(self, sid: str | None) -> None:
-        if sid == self._selected and (sid is None or (sid in self.chips and self.chips[sid].get_active())):
-            return
-        self._selected = sid
-        self._guard = True
-        try:
-            if sid in self.chips:
-                self.chips[sid].set_active(True)
-            else:  # nothing chosen (or it is not there): no chip is checked
-                for c in self.chips.values():
-                    c.set_active(False)
-        finally:
-            self._guard = False
-
-    def _toggled(self, chip: SourceChip) -> None:
-        if chip.get_active() and not self._guard:
-            self._selected = chip.item_id
-            self.on_pick(chip.item_id)
-
-    def tick(self, now: float) -> None:
-        for c in self.chips.values():
-            c.tick(now)
-
-    def set_dark(self, dark: bool) -> None:
-        self.dark = dark
-        for c in self.chips.values():
-            c.set_dark(dark)
-
-
-class AudioSourceDropdown(Gtk.DropDown):
-    """The audio sources as a dropdown: full names (an output's monitor says so), a level meter per channel in every
-    entry and on the button, nothing else. Its width never changes, so neither does the strip's layout.
+class SourceDropdown(Gtk.DropDown):
+    """The sources of one clock as a dropdown beside Downbeat: an indicator and the name in every entry and on the
+    button, nothing else. Its width never changes, so neither does the strip's layout. Subclasses say what the
+    indicator is (a level meter, a beat tile).
 
     ``on_pick(id)`` when a source is chosen from the list. An entry with an empty id stands for "nothing chosen" or a
     chosen source that is not there; it is shown but cannot be picked."""
 
     NAME_CHARS = 18
-    METER_PX = 16  # every entry's meter this wide, whatever its channel count: the names line up
+    CSS_CLASS = "source-dropdown"
 
     def __init__(self, on_pick: Callable[[str], None]) -> None:
         super().__init__()
-        self.add_css_class("audio-source")
+        self.add_css_class("source-dropdown")
+        self.add_css_class(self.CSS_CLASS)
         self.set_valign(Gtk.Align.CENTER)
         self.on_pick = on_pick
         self.ids: list[str] = []
         self._items: dict[str, sm.Item] = {}
         self._labels: list[str] = []
-        self._meters: dict[str, list[LevelMeter]] = {}  # id -> meters on screen for it (list rows and the button)
+        self._indicators: dict[str, list[Any]] = {}  # id -> indicators on screen for it (list rows and the button)
         self._key: Any = None
         self._guard = False
         self.dark = True
@@ -265,6 +148,14 @@ class AudioSourceDropdown(Gtk.DropDown):
         self.set_factory(factory)
         self.connect("notify::selected", self._on_selected)
 
+    # --- the indicator (subclasses) ----------------------------------------------------------
+
+    def _new_indicator(self) -> Gtk.Widget:
+        raise NotImplementedError
+
+    def _show(self, indicator: Any, item: sm.Item, now: float) -> None:
+        """Bring an indicator up to date with its item; ``now`` for anything that moves with time."""
+
     # --- rows ------------------------------------------------------------------------------
 
     def _setup(self, _f: Any, li: Any) -> None:
@@ -272,33 +163,33 @@ class AudioSourceDropdown(Gtk.DropDown):
         name.set_ellipsize(Pango.EllipsizeMode.END)
         name.set_width_chars(self.NAME_CHARS)  # fixed: a longer or shorter name never resizes the button
         name.set_max_width_chars(self.NAME_CHARS)
-        li.set_child(hbox(8, LevelMeter(2, width=self.METER_PX), name))
+        li.set_child(hbox(8, self._new_indicator(), name))
 
     @staticmethod
-    def _parts(li: Any) -> tuple[Gtk.Box, LevelMeter, Gtk.Label]:
+    def _parts(li: Any) -> tuple[Gtk.Box, Any, Gtk.Label]:
         # (found through the item's child: Python attributes on a ListItem do not reliably survive between signals)
         box = li.get_child()
         return box, box.get_first_child(), box.get_last_child()
 
     def _bind(self, _f: Any, li: Any) -> None:
-        box, meter, name = self._parts(li)
+        box, ind, name = self._parts(li)
         pos = li.get_position()
         sid = self.ids[pos] if 0 <= pos < len(self.ids) else ""
         name.set_text(self._labels[pos] if 0 <= pos < len(self._labels) else "")
         item = self._items.get(sid)
-        meter.set_visible(item is not None)
-        meter.dark = self.dark
+        ind.set_visible(item is not None)
+        ind.dark = self.dark
         if item is not None:
-            meter._painted = 0.0
-            meter.set_levels(item.levels, item.peaks)
-            self._meters.setdefault(sid, []).append(meter)
+            ind._painted = 0.0
+            self._show(ind, item, time.monotonic())
+            self._indicators.setdefault(sid, []).append(ind)
         (box.add_css_class if item is not None and item.dim else box.remove_css_class)("dim")
 
     def _unbind(self, _f: Any, li: Any) -> None:
-        _box, meter, _name = self._parts(li)
-        for meters in self._meters.values():
-            if meter in meters:
-                meters.remove(meter)
+        _box, ind, _name = self._parts(li)
+        for inds in self._indicators.values():
+            if ind in inds:
+                inds.remove(ind)
 
     # --- content ---------------------------------------------------------------------------
 
@@ -314,16 +205,17 @@ class AudioSourceDropdown(Gtk.DropDown):
         if key != self._key:
             self._key = key
             self.ids, self._labels = ids, labels
-            self._meters = {}
+            self._indicators = {}
             self._guard = True
             try:
                 self.set_model(Gtk.StringList.new(labels))
             finally:
                 self._guard = False
         else:
+            now = time.monotonic()
             for it in items:
-                for m in self._meters.get(it.id, []):
-                    m.set_levels(it.levels, it.peaks)
+                for ind in self._indicators.get(it.id, []):
+                    self._show(ind, it, now)
         index = ids.index(selected) if selected in ids else 0
         if self.get_selected() != index:
             self._guard = True
@@ -340,12 +232,54 @@ class AudioSourceDropdown(Gtk.DropDown):
         if not self._guard and self.selected_id():
             self.on_pick(self.selected_id())
 
+    def tick(self, now: float) -> None:
+        """Every frame while shown: indicators that move with time follow it."""
+
     def set_dark(self, dark: bool) -> None:
         self.dark = dark
-        for meters in self._meters.values():
-            for m in meters:
-                m.dark = dark
-                m.queue_draw()
+        for inds in self._indicators.values():
+            for ind in inds:
+                ind.dark = dark
+                ind.queue_draw()
+
+
+class AudioSourceDropdown(SourceDropdown):
+    """The audio sources: full names (an output's monitor says so), a level meter per channel."""
+
+    CSS_CLASS = "audio-source"
+    METER_PX = 16  # every entry's meter this wide, whatever its channel count: the names line up
+
+    def _new_indicator(self) -> Gtk.Widget:
+        return LevelMeter(2, width=self.METER_PX)
+
+    def _show(self, indicator: LevelMeter, item: sm.Item, now: float) -> None:
+        indicator.set_levels(item.levels, item.peaks)
+
+
+class MidiPortDropdown(SourceDropdown):
+    """The MIDI input ports: short names (the full one is the tooltip), a beat tile at each port's tempo."""
+
+    CSS_CLASS = "midi-port"
+
+    def _new_indicator(self) -> Gtk.Widget:
+        return Pulse()
+
+    def _show(self, indicator: Pulse, item: sm.Item, now: float) -> None:
+        indicator.set_phase(sm.beat_phase(item.bpm, item.beat_time, now))
+
+    def _bind(self, f: Any, li: Any) -> None:
+        super()._bind(f, li)
+        box = li.get_child()
+        pos = li.get_position()
+        item = self._items.get(self.ids[pos] if 0 <= pos < len(self.ids) else "")
+        box.set_tooltip_text(item.id if item is not None and item.id != item.name else None)  # the full port name
+
+    def tick(self, now: float) -> None:
+        for sid, pulses in self._indicators.items():
+            item = self._items.get(sid)
+            if item is not None:
+                for p in pulses:
+                    self._show(p, item, now)
 
 
 class HoverPreview:

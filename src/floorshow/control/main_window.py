@@ -24,7 +24,7 @@ from .client import RendererClient  # noqa: E402
 from .library import Library  # noqa: E402
 from .preview_widgets import PreviewManager, PreviewPicture  # noqa: E402
 from .previews import DEFAULT_TILE_DEG, OVERSAMPLE, THUMB_H, THUMB_W, Look, PreviewCache  # noqa: E402
-from .source_picker import AudioSourceDropdown, HoverPreview, SourcePicker  # noqa: E402
+from .source_picker import AudioSourceDropdown, HoverPreview, MidiPortDropdown  # noqa: E402
 from .store import ConfigStore  # noqa: E402
 from .widgets import Segmented, hbox, icon, kbd, label, push_button, set_classes, vbox  # noqa: E402
 
@@ -341,14 +341,15 @@ class MainWindow(Adw.ApplicationWindow):
         # Resting the pointer on "Audio" shows the chosen audio source's tempo, so it is clear before switching
         # whether that source has a beat at all.
         self.audio_hover = HoverPreview(self.clock_seg.buttons["audio"], self._audio_hover_text)
-        # For the audio clock: a dropdown of the sources (with level meters) beside Downbeat. For the MIDI clock: the
-        # ports below the strip, each with the beat it carries.
+        # Beside Downbeat, the sources of the clock that is shown: for the audio clock the sources with level meters,
+        # for the MIDI clock the ports, each with the beat it carries.
         self.audio_picker = AudioSourceDropdown(self._pick_audio)
         self.audio_picker.set_tooltip_text("Audio source: what the beat is taken from")
-        self.midi_picker = SourcePicker("MIDI port", self._pick_midi)
+        self.midi_picker = MidiPortDropdown(self._pick_midi)
+        self.midi_picker.set_tooltip_text("MIDI port: what the beat is taken from")
         strip = vbox(10, hbox(12, self.source_box, Gtk.Box(hexpand=True), self.clock_seg),
-                     hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.audio_picker, self.downbeat_btn, self.tap_btn),
-                     self.midi_picker,
+                     hbox(8, self.pips_box, Gtk.Box(hexpand=True), self.audio_picker, self.midi_picker,
+                          self.downbeat_btn, self.tap_btn),
                      hexpand=True, valign=Gtk.Align.CENTER)
         self.clock_panel = hbox(16, strip, hexpand=True)
         self.clock_panel.add_css_class("panel")
@@ -744,7 +745,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _pick_midi(self, name: str) -> None:
-        """A chip in the MIDI picker: that port drives the MIDI clock from now on."""
+        """A port chosen in the MIDI dropdown: it drives the MIDI clock from now on."""
         if self._ui_guard:
             return
         try:
@@ -767,7 +768,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._midi_previewing = on
 
     def _update_pickers(self, st: dict[str, Any] | None) -> None:
-        """The pickers' chips and meters: on every state, without the window's full refresh."""
+        """The source dropdowns and their meters: on every state, without the window's full refresh."""
         shown = self._shown_source()
         self.midi_picker.set_visible(shown == "midi" and st is not None)
         self.audio_picker.set_visible(shown == "audio" and st is not None)
@@ -785,8 +786,9 @@ class MainWindow(Adw.ApplicationWindow):
                                             sm.audio_placeholder(items, self.cfg.clock.audio_source))
             elif shown == "midi":
                 ports = st.get("midi_ports")
-                self.midi_picker.set_items(sm.midi_items(ports), sm.selected_midi(ports, self.cfg.clock.midi_port),
-                                           "Looking for MIDI ports…" if not ports else "")
+                items = sm.midi_items(ports)
+                self.midi_picker.set_items(items, sm.selected_midi(ports, self.cfg.clock.midi_port),
+                                           sm.midi_placeholder(items, self.cfg.clock.midi_port))
         finally:
             self._ui_guard = guard
         if self.audio_hover.visible:

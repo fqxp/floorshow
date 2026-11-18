@@ -1,4 +1,4 @@
-"""What the source picker and the Audio hover show: audio sources with their level meters, MIDI ports with their beat
+"""What the source dropdowns and the Audio hover show: audio sources with their level meters, MIDI ports with their beat
 previews, and the toasts when one is chosen. Pure functions of the renderer's state, so they are tested without GTK.
 
 The renderer's state carries ``audio`` (see render/audio_state.py) and ``midi_ports`` (render/midi_preview.py).
@@ -16,7 +16,7 @@ SILENT_DB = -60.0  # a source whose loudest channel stays below this has nothing
 
 @dataclass(frozen=True)
 class Item:
-    """One chip in the picker."""
+    """One entry in a source dropdown."""
 
     id: str  # what is saved: the audio node name, or the MIDI port name
     name: str
@@ -67,7 +67,7 @@ def midi_items(ports: list[dict[str, Any]] | None) -> list[Item]:
 
 def _short_port(name: str) -> str:
     """ "RtMidiOut Client:floorshow test clock 128:0" -> "floorshow test clock": the ALSA client and numbers say
-    nothing to a person (the full name is the chip's tooltip)."""
+    nothing to a person (the full name is the tooltip)."""
     if ":" in name and not name.endswith(")"):
         client, _, rest = name.partition(":")
         parts = rest.rsplit(" ", 1)
@@ -83,6 +83,13 @@ def audio_placeholder(items: list[Item], cfg_source: str | None) -> str:
     return "Choose a source…" if items else "No audio source found"
 
 
+def midi_placeholder(items: list[Item], cfg_port: str | None) -> str:
+    """The MIDI dropdown's entry while the chosen port is not among the ports."""
+    if cfg_port:
+        return f"{cfg_port} (not there)"
+    return "Choose a port…" if items else "Looking for MIDI ports…"
+
+
 def selected_audio(audio: dict[str, Any] | None, cfg_source: str | None) -> str | None:
     """The id to show as chosen: the resolved source, else what the config names (it may be unplugged)."""
     return (audio or {}).get("source") or cfg_source
@@ -94,11 +101,6 @@ def selected_midi(ports: list[dict[str, Any]] | None, cfg_port: str | None) -> s
         return None
     want = cfg_port.lower()
     return next((p["name"] for p in ports or [] if want in p["name"].lower()), cfg_port)
-
-
-def items_key(items: list[Item]) -> str:
-    """Changes when the chips have to be rebuilt (not when a meter or a tempo moves)."""
-    return json.dumps([(i.id, i.name, i.kind) for i in items])
 
 
 def hover_text(audio: dict[str, Any] | None, cfg_source: str | None, active: bool = True,
