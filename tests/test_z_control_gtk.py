@@ -408,6 +408,30 @@ def test_outdated_renderer_banner_restarts_the_renderer(win):
     assert started == [1] and not w._restart_pending
 
 
+def test_simulation_note_turns_the_simulation_off(win):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st(simulation=True))
+    pump(50)
+    row = w.banner_box.get_first_child()
+    assert row is not None and row.has_css_class("banner-info")
+    row.get_last_child().emit("clicked")
+    assert fake.sent[-1] == ("simulation.set", {"on": False})
+
+
+def test_menu_shortcut_keys_open_the_dialogs(win):
+    w, fake = win
+    w.set_connection(True)
+    w.apply_state(st())
+    opened = []
+    w.open_scenes = lambda: opened.append("scenes")
+    w.open_calibration = lambda: opened.append("calibration")
+    w._register_actions()  # re-bind the actions to the stubs
+    w.run_action("scenes")
+    w.run_action("calibration")
+    assert opened == ["scenes", "calibration"]
+
+
 def test_unchanged_states_do_not_refresh_the_window(win):
     w, _ = win
     w.set_connection(True)

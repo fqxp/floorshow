@@ -248,17 +248,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.conn_chip = self._make_chip()
         header.pack_start(self.conn_chip["box"])
         header.set_title_widget(label("Floorshow", "title-label"))
+        def item(menu: Gio.Menu, text: str, action: str, accel: str | None = None) -> None:
+            # "accel" only shows the shortcut in the menu; the window's key handler (vm.key_to_action) acts on it.
+            it = Gio.MenuItem.new(text, action)
+            if accel:
+                it.set_attribute_value("accel", GLib.Variant.new_string(accel))
+            menu.append_item(it)
+
         menu = Gio.Menu()
-        menu.append("Scenes…", "win.scenes")
-        menu.append("Calibration…", "win.calibration")
-        menu.append("Preferences…", "win.preferences")
-        menu.append("Quit renderer", "win.quit-renderer")
+        item(menu, "Scenes…", "win.scenes", "<Control>e")
+        item(menu, "Calibration…", "win.calibration", "<Control>k")
+        item(menu, "Preferences…", "win.preferences", "<Control>comma")
+        item(menu, "Quit renderer", "win.quit-renderer", "<Control><Shift>q")
         sim = Gio.Menu()
-        sim.append("Haze simulation", "win.simulation")  # a check item: the action has a boolean state
+        item(sim, "Haze simulation", "win.simulation", "h")  # a check item: the action has a boolean state
         menu.append_section(None, sim)
         section = Gio.Menu()
-        section.append("Keyboard shortcuts", "win.shortcuts")
-        section.append("About Floorshow", "win.about")
+        item(section, "Keyboard shortcuts", "win.shortcuts", "<Control>question")
+        item(section, "About Floorshow", "win.about")
         menu.append_section(None, section)
         mb = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         mb.add_css_class("flat-icon")
@@ -569,8 +576,8 @@ class MainWindow(Adw.ApplicationWindow):
                 self.act_scene(sid)
         elif action == "brightness":
             self.brightness.set_value(min(100, max(0, self.brightness.get_value() + arg)))
-        elif action == "preferences":
-            self.win_action("preferences")
+        elif action in ("preferences", "scenes", "calibration", "quit-renderer"):
+            self.win_action(action)
         elif action == "shortcuts":
             self.win_action("shortcuts")
         elif action == "quit":
@@ -905,6 +912,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.send("quit")
         elif banner.kind == "config_error":
             Gtk.FileLauncher.new(Gio.File.new_for_path(str(self.store.path))).launch(self, None, None)
+        elif banner.kind == "simulation":
+            self.send("simulation.set", on=False)
         elif banner.kind == "calibrating":
             if self.calibration_window:
                 self.calibration_window.present()
@@ -1371,7 +1380,7 @@ class MainWindow(Adw.ApplicationWindow):
         while (c := self.banner_box.get_first_child()) is not None:
             self.banner_box.remove(c)
         for b in items:
-            row = hbox(10, icon("dialog-warning-symbolic", 18), label(b.text if b.kind != "scene_error" else f"{b.title} · {b.text}",
+            row = hbox(10, icon("dialog-information-symbolic" if b.info else "dialog-warning-symbolic", 18), label(b.text if b.kind != "scene_error" else f"{b.title} · {b.text}",
                                                                       "banner-title" if b.kind == "calibrating" else "",
                                                                       hexpand=True, wrap=True), valign=Gtk.Align.CENTER)
             row.get_first_child().add_css_class("banner-icon")
@@ -1380,6 +1389,8 @@ class MainWindow(Adw.ApplicationWindow):
                 btn.connect("clicked", lambda _b, b=b: self.act_banner(b))
                 row.append(btn)
             row.add_css_class("banner")
+            if b.info:
+                row.add_css_class("banner-info")
             self.banner_box.append(row)
 
     # --- per-frame beat display ----------------------------------------------------------
@@ -1453,8 +1464,9 @@ class MainWindow(Adw.ApplicationWindow):
                              ("Scene 1–10", ["1", "…", "9", "0"]), ("Previous / next scene", ["[", "]"]),
                              ("Manual / Random / Sequence", ["M", "R", "S"]), ("Brightness", ["Ctrl", "↑↓"]),
                              ("Haze simulation", ["H"]),
+                             ("Scenes", ["Ctrl", "E"]), ("Calibration", ["Ctrl", "K"]),
                              ("Preferences", ["Ctrl", ","]), ("Shortcuts", ["Ctrl", "?"]),
-                             ("Quit Floorshow", ["Ctrl", "Q"])]),
+                             ("Quit renderer", ["Ctrl", "Shift", "Q"]), ("Quit Floorshow", ["Ctrl", "Q"])]),
         ]
         cols = hbox(32, margin_top=18, margin_bottom=18, margin_start=24, margin_end=24)
         for title, items in rows:

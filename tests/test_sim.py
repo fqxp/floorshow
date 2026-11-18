@@ -132,6 +132,15 @@ def test_key_h_in_the_controller():
     assert key_to_action("h") == key_to_action("H") == ("simulation", None)
 
 
+def test_menu_shortcuts():
+    from floorshow.control.viewmodel import key_to_action
+
+    assert key_to_action("e", ctrl=True) == ("scenes", None)
+    assert key_to_action("k", ctrl=True) == ("calibration", None)
+    assert key_to_action("Q", ctrl=True, shift=True) == ("quit-renderer", None)
+    assert key_to_action("q", ctrl=True) == ("quit", None)
+
+
 # --- GL -----------------------------------------------------------------------------------
 
 W, H = 320, 180
@@ -205,3 +214,12 @@ def test_the_projector_image_is_unchanged_after_a_simulated_frame(gl):
     draw_rgb(gl, frame(WHITE, S.SimSpec()))
     after = draw_rgb(gl, frame(WHITE, None))
     assert (before == after).all()  # in particular, the simulation leaves no blending switched on
+
+
+def test_the_controller_shows_a_note_while_simulating():
+    from floorshow.control import viewmodel as vm
+
+    clock = dict(source="internal", bpm=120.0, beat=0.0, beats_per_bar=4, locked=True)
+    assert vm.banners(True, dict(clock=clock, rev=vm.REV)) == []
+    [b] = vm.banners(True, dict(clock=clock, rev=vm.REV, simulation=True))
+    assert b.kind == "simulation" and b.info and b.action == "Turn off" and "double-click" in b.text

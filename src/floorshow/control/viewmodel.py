@@ -112,11 +112,12 @@ def beat_in_bar(clock: dict[str, Any], elapsed_s: float = 0.0) -> tuple[int, flo
 @dataclass(frozen=True)
 class Banner:
     kind: str  # "renderer_outdated" | "midi_lost" | "audio_unavailable" | "scene_error" | "config_error" | "output_hidden"
-    # | "calibrating"
+    # | "calibrating" | "simulation"
     title: str
     text: str
     action: str | None  # button label; None = a plain notice
     scene_id: str | None = None
+    info: bool = False  # a neutral note, not a warning
 
 
 def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
@@ -151,6 +152,11 @@ def banners(connected: bool, state: dict[str, Any] | None) -> list[Banner]:
     for sid, problems in state.get("scene_errors", {}).items():
         out.append(Banner("scene_error", "File error", f"{sid}.yaml · {problems[0]}", "Open in editor", scene_id=sid))
         break  # one banner at a time; the scenes dialog lists all of them
+    if state.get("simulation"):
+        out.append(Banner("simulation", "Haze simulation",
+                          "Haze simulation: the output window shows the light the ball throws through hazy air instead of "
+                          "the projector image. Drag in it to walk round the ball, scroll to step closer, double-click to "
+                          "go back.", "Turn off", info=True))
     return out
 
 
@@ -262,8 +268,12 @@ def key_to_action(name: str, ctrl: bool = False, shift: bool = False) -> tuple[s
     """Keyboard shortcut (from the design's shortcut sheet) -> (action, argument), or None.
     ``name`` is the GDK key name, e.g. "space", "bracketleft", "1"."""
     if ctrl:
+        if shift and name in ("q", "Q"):
+            return ("quit-renderer", None)
         return {"space": ("toggle-run", None), "Up": ("brightness", +5), "Down": ("brightness", -5), "comma": ("preferences", None),
                 "b": ("blackout", None), "B": ("blackout", None),
+                "e": ("scenes", None), "E": ("scenes", None),
+                "k": ("calibration", None), "K": ("calibration", None),
                 "q": ("quit", None), "Q": ("quit", None),
                 "question": ("shortcuts", None), "slash": ("shortcuts", None) if shift else None}.get(name)
     if name in ("t", "T"):

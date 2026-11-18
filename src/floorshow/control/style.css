@@ -113,6 +113,12 @@ switch.mb-switch:checked slider { background: @on_acc; }
 .banner button.mb-btn { background: transparent; border-color: @amber_line; color: @amber_t; min-height: 2.31em; }
 .banner button.mb-btn:hover { background: alpha(@amber, 0.15); }
 .banner-icon { color: @amber; }
+/* a neutral note (haze simulation is on): not a warning */
+.banner.banner-info { background: @bg2; border-bottom-color: @line; color: @t1; }
+.banner.banner-info label { color: @t1; }
+.banner.banner-info button.mb-btn { border-color: @line; color: @t1; }
+.banner.banner-info button.mb-btn:hover { background: alpha(@t1, 0.08); }
+.banner.banner-info .banner-icon { color: @t2; }
 
 /* empty states */
 .empty-icon { background: @bg3; border: 1px solid @line2; border-radius: 1.86em; min-width: 3.71em; min-height: 3.71em; color: @t2; }

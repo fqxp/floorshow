@@ -169,9 +169,7 @@ class PreferencesDialog(Adw.Window):
 
     def _page_simulation(self, page: Gtk.Box) -> None:
         s = self.cfg.simulation
-        g = SettingsGroup("Haze simulation", "Press H, or pick Haze simulation in the menu, and the output window shows "
-                          "the light the ball throws through hazy air instead of the projector image. Drag in it to walk "
-                          "round the ball, scroll to step closer, double-click to go back.")
+        g = SettingsGroup("Haze simulation")
 
         def switch(key: str, value: bool) -> Gtk.Switch:
             sw = Gtk.Switch(active=value, valign=Gtk.Align.CENTER)
