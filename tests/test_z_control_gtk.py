@@ -1434,7 +1434,7 @@ def test_the_audio_dropdown_lists_the_sources_by_name_and_picks_one(win):
     # full names (a monitor says so), no tempo or status in them
     assert dropdown_labels(dd) == ["Monitor of Speakers", "Built-in mic"]
     assert dd.selected_id() == "alsa_output.speakers"
-    assert dd._meters["alsa_output.speakers"][0].levels == (-14.0, -16.0)  # the button's meter
+    assert dd._indicators["alsa_output.speakers"][0].levels == (-14.0, -16.0)  # the button's meter
     assert w.source_chip.get_text() == "Audio · 124.3 BPM · Monitor of Speakers"
     fake.sent.clear()
     dd.set_selected(1)  # chosen from the list
@@ -1469,7 +1469,7 @@ def test_levels_move_without_refreshing_the_window(win):
     real = w.refresh
     w.refresh = lambda: (refreshes.append(1), real())
     w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-30.0)))
-    meter = w.audio_picker._meters["alsa_output.speakers"][0]
+    meter = w.audio_picker._indicators["alsa_output.speakers"][0]
     meter._painted = 0.0  # not throttled for the next one
     w.apply_state(st(clock=dict(st()["clock"], source="audio"), audio=audio_state(speakers_db=-8.0)))
     assert not refreshes
@@ -1531,16 +1531,28 @@ def test_the_midi_picker_previews_ports_only_while_it_shows(win):
     fake.sent.clear()
     w.apply_state(st(clock=dict(st()["clock"], source="midi", port="Mixxx 1"), midi_ports=MIDI_PORTS))
     assert ("midi.preview", {"on": True}) in fake.sent and w.midi_picker.get_visible()
-    chips = w.midi_picker.chips
-    assert chips["Mixxx 1"].get_active() and chips["Mixxx 1"].status.get_text() == "100 BPM"
-    assert chips["Pads"].status.get_text() == "no beat"
-    chips["Pads"].set_active(True)
+    dd = w.midi_picker
+    assert dd.selected_id() == "Mixxx 1" and "Pads" in dd.ids
+    dd.set_selected(dd.ids.index("Pads"))  # chosen from the list
     assert w.store.load().clock.midi_port == "Pads" and shown[-1] == "MIDI · Pads · no beat on this port yet"
     fake.sent.clear()
     w.apply_state(st())  # back on the internal clock
     w._clock_hold = 0.0
     w.apply_state(st())
     assert ("midi.preview", {"on": False}) in fake.sent and not w.midi_picker.get_visible()
+
+
+def test_the_midi_dropdown_opens_its_list_with_a_beat_tile_per_port(win):
+    w, _ = win
+    w.store.update({"clock": {"source": "midi", "midi_port": "mixxx"}})
+    w.cfg = w.store.load()
+    w.set_connection(True)
+    w.apply_state(st(clock=dict(st()["clock"], source="midi", port="Mixxx 1"), midi_ports=MIDI_PORTS))
+    dd = w.midi_picker
+    dd.activate()
+    pump(200)
+    assert dd._indicators.get("Pads")  # its row in the open list (the button shows Mixxx 1)
+    dd.get_last_child().popdown()
 
 
 def test_an_unavailable_listener_gets_a_banner_that_goes_back_to_internal(win):
