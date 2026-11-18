@@ -15,11 +15,11 @@ Floorshow drives a video projector aimed at a disco mirror ball. Bands, rings an
 
 Not built yet: the motor that turns the ball.
 
-![Spots on the mirror ball in the output window](docs/media/mirror-ball.png)
+![Spots on the mirror ball in the output window](docs/media/show.png)
 
 *The output window, as the projector sends it: spots mapped onto the calibrated ball, everything else dark.*
 
-![Haze simulation: beams from the mirror tiles in hazy air](docs/media/haze-beams.png)
+![Haze simulation: beams from the mirror tiles in hazy air](docs/media/haze-simulation.png)
 
 *The haze simulation: the beams the mirror tiles throw into the room, here while the accent colour changes.*
 
