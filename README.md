@@ -100,8 +100,23 @@ scenes, see [docs/scenes-tutorial.md](docs/scenes-tutorial.md) and [docs/scenes-
 uv run --extra render --extra control --extra audio pytest
 ```
 
-The GL tests use a standalone EGL context and need no display. The controller's GTK tests need one and
-skip without it. To run them headless, use GTK's Broadway backend (from `libgtk-4-bin`):
+This runs the tests visibly: the controller's GTK tests open their windows on your desktop and take
+focus while they run, so you can watch them but not use the desktop. The GL tests use a standalone EGL
+context and need no display; the GTK tests need one and skip without it.
+
+To run everything in the background instead, run the tests against a private headless GNOME Shell
+(GNOME 48 or later). Nothing appears on your screen, and arguments go to pytest:
+
+```bash
+tools/test-headless.sh
+```
+
+```bash
+tools/test-headless.sh tests/test_z_control_gtk.py -x
+```
+
+`test_inhibit` skips there, since it needs a real GNOME session. Without GNOME Shell, GTK's Broadway
+backend (from `libgtk-4-bin`) also keeps the windows off the desktop:
 
 ```bash
 gtk4-broadwayd :7 &
